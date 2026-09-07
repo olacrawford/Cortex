@@ -1,0 +1,30 @@
+# MewCode 配置示例
+# 复制为 config.yaml 并填入真实密钥：
+#   cp .mewcode/config.yaml.example .mewcode/config.yaml
+# 注意：config.yaml 已被 .gitignore 忽略，不会提交到仓库；本示例仅含占位密钥，可安全提交。
+
+providers:
+  - name: claude
+    protocol: anthropic
+    api_key: sk-ant-xxxxxxxxxxxxxxxxxxxxxxxx
+    model: claude-sonnet-4-20250514
+    thinking: true
+
+  # - name: deepseek
+  #   protocol: openai-compat
+  #   base_url: https://api.deepseek.com
+  #   api_key: sk-ds-xxxxxxxxxxxxxxxxxxxxxxxx
+  #   model: deepseek-chat
+
+  # - name: gpt4
+  #   protocol: openai
+  #   api_key: sk-xxxxxxxxxxxxxxxxxxxxxxxx
+  #   model: gpt-4o
+
+# 字段说明：
+#   name       供应商标识名（状态栏左侧显示）
+#   protocol   anthropic | openai | openai-compat
+#   base_url   可选；自定义端点（openai-compat 常用，如 DeepSeek）
+#   api_key    认证密钥（必填，不回显）
+#   model      模型名（状态栏右侧显示）
+#   thinking   可选；仅 anthropic 生效（扩展思考）
