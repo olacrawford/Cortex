@@ -105,7 +105,15 @@ java -jar build/libs/cortex.jar
 - `docs/spec/` — 规格驱动的设计与验收文档（按 phase 组织）
 - `.cortex/config.yaml.example` — 配置示例
 
+## 开发
+
+项目采用**规格驱动开发**：每个阶段先在 `docs/spec/` 下产出 Spec（做什么）→ Plan（怎么做）→ Tasks（怎么拆）→ Checklist（怎么验收）四份文档，批准后再编码，最后按 Checklist 在 tmux 中做端到端验收。
+
+- 构建/测试命令与架构说明见 [AGENTS.md](AGENTS.md)
+- 各阶段的设计与验收记录见 `docs/spec/phase-01` ~ `phase-03`
+- 提交约定：中文提交说明，按阶段在 `feature/phaseNN` 分支上开发
+
 ## 相关文档
 
 - `AGENTS.md` — 面向开发者的架构与约定说明
-- `docs/spec/` — 各 phase 的 Spec / Plan / Tasks / Checklist
+- `docs/spec/00-meta/mew-spec.md` — 规格驱动开发流程说明
