@@ -34,6 +34,11 @@ public final class GlobTool implements Tool {
     }
 
     @Override
+    public boolean readOnly() {
+        return true;
+    }
+
+    @Override
     public Map<String, Object> inputSchema() {
         Map<String, Object> pattern = new LinkedHashMap<>();
         pattern.put("type", "string");

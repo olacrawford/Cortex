@@ -33,6 +33,11 @@ public final class ReadFileTool implements Tool {
     }
 
     @Override
+    public boolean readOnly() {
+        return true;
+    }
+
+    @Override
     public Map<String, Object> inputSchema() {
         Map<String, Object> path = new LinkedHashMap<>();
         path.put("type", "string");

@@ -43,6 +43,24 @@ public final class ToolRegistry {
         return List.copyOf(defs);
     }
 
+    /** Plan Mode 用：仅导出只读工具定义，保持注册顺序。 */
+    public List<ToolDef> readOnlyDefinitions() {
+        List<ToolDef> defs = new ArrayList<>();
+        for (String name : order) {
+            Tool t = tools.get(name);
+            if (t.readOnly()) {
+                defs.add(new ToolDef(t.name(), t.description(), t.inputSchema()));
+            }
+        }
+        return List.copyOf(defs);
+    }
+
+    /** 分批判定：只读工具可与相邻只读工具并发；未知工具返回 false（按串行处理）。 */
+    public boolean isReadOnly(String name) {
+        Tool t = tools.get(name);
+        return t != null && t.readOnly();
+    }
+
     /**
      * 按名执行工具。未知工具、参数解析失败、执行异常一律返回 error 结果而非抛异常。
      *

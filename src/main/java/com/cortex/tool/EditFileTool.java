@@ -36,6 +36,11 @@ public final class EditFileTool implements Tool {
     }
 
     @Override
+    public boolean readOnly() {
+        return false;
+    }
+
+    @Override
     public Map<String, Object> inputSchema() {
         Map<String, Object> path = new LinkedHashMap<>();
         path.put("type", "string");

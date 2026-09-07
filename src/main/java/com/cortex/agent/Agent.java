@@ -1,11 +1,13 @@
 package com.cortex.agent;
 
 import com.cortex.conversation.ConversationManager;
+import com.cortex.conversation.Message;
 import com.cortex.llm.LlmClient;
 import com.cortex.llm.StreamEvent;
 import com.cortex.llm.ToolCall;
 import com.cortex.llm.ToolDef;
 import com.cortex.llm.ToolResult;
+import com.cortex.prompt.PromptBuilder;
 import com.cortex.tool.Result;
 import com.cortex.tool.ToolRegistry;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -14,6 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -21,13 +24,24 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 /**
- * 单轮闭环编排（F5/F6）：请求#1（带工具）→ 收集工具调用 → 注册中心执行 →
- * 结果回灌 → 请求#2（续答）→ 最终文本答复 → 停。
- * 保证单轮上限（AC9）：续答请求即使再次请求工具，也不再执行。
+ * ReAct 循环编排（F1/F2）：带工具发起请求 → 流式收集 → 有工具调用则执行并回灌，
+ * 进入下一轮；纯文本即最终答复，循环结束。停止条件：自然完成、迭代上限（兜底）、
+ * 用户取消、连续未知工具、流出错。任何终止路径都保证对话历史配对合法（F6）。
  */
 public final class Agent {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    /** 内置迭代上限兜底（F2，不可配置）。 */
+    static final int MAX_ITERATIONS = 25;
+    /** 连续「整轮只产生未知工具调用」的迭代数上限（F2）。 */
+    static final int MAX_UNKNOWN_RUN = 3;
+
+    // 停止/收尾提示文案——既推给 UI（Event.Notice / 兜底文本），也写入历史收尾。
+    static final String NOTICE_MAX_ITER = "（已达最大迭代轮数 25，自动停止；可继续发消息推进。）";
+    static final String NOTICE_UNKNOWN_TOOLS = "（连续多轮只请求到未注册的工具，自动停止。）";
+    static final String NOTICE_STREAM_ERR = "（请求出错，本轮已中断。）";
+    static final String NOTICE_CANCELLED = "（已取消。）";
 
     private final LlmClient client;
     private final ToolRegistry registry;
@@ -38,77 +52,215 @@ public final class Agent {
     }
 
     /**
-     * 执行单轮闭环，返回事件队列。内部用虚拟线程驱动整条链路；
-     * 订阅方（TUI）逐条 poll，直到 Done / Failed。
+     * 执行 Agent Loop，返回事件队列。内部用虚拟线程驱动整条循环；
+     * 订阅方（TUI）逐条 poll，直到 Done（任何结束路径的终止哨兵）。
      */
-    public BlockingQueue<AgentEvent> run(ConversationManager conv) {
+    public BlockingQueue<AgentEvent> run(ConversationManager conv, Mode mode, CancelToken cancel) {
         BlockingQueue<AgentEvent> out = new LinkedBlockingQueue<>();
-        Thread.ofVirtual().name("agent-turn").start(() -> {
+        Thread.ofVirtual().name("agent-loop").start(() -> {
             try {
-                turn(conv, out);
+                loop(conv, mode, cancel, out);
             } catch (Exception e) {
-                put(out, new AgentEvent.Failed(e.getMessage() != null ? e.getMessage() : e.toString()));
+                // 未预期异常：发 Failed（正常路径已发过的会由 TUI 幂等处理）
+                putDirect(out, new AgentEvent.Failed(e.getMessage() != null ? e.getMessage() : e.toString()));
+            } finally {
+                // 终止哨兵：绕过 emit 的取消检查，保证 TUI 总能收到结束信号回空闲态
+                putDirect(out, new AgentEvent.Done());
             }
         });
         return out;
     }
 
-    private void turn(ConversationManager conv, BlockingQueue<AgentEvent> out) throws InterruptedException {
-        List<ToolDef> defs = registry.definitions();
+    // ─── ReAct 主循环 ───
 
-        // ── 请求#1：可能带工具调用 ──
-        Once first = streamOnce(conv, defs, out);
-        if (first.error() != null) {
-            put(out, new AgentEvent.Failed(first.error()));
-            return;
-        }
-        if (first.calls().isEmpty()) {
-            conv.addAssistantMessage(first.text());
-            put(out, new AgentEvent.Done());
-            return;
-        }
+    private void loop(ConversationManager conv, Mode mode, CancelToken cancel, BlockingQueue<AgentEvent> out)
+            throws InterruptedException {
+        List<ToolDef> defs = mode == Mode.PLAN ? registry.readOnlyDefinitions() : registry.definitions();
+        String suffix = mode == Mode.PLAN ? PromptBuilder.PLAN_MODE_REMINDER : "";
 
-        // ── 有工具调用：记历史 → 顺序执行 → 结果回灌 ──
-        conv.addAssistantWithToolCalls(first.text(), first.calls());
-        List<ToolResult> results = new ArrayList<>();
-        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            for (ToolCall call : first.calls()) {
-                put(out, new AgentEvent.Tool(new ToolEvent(
-                        call.name(), preview(call.args()), Phase.START, "", false)));
-                Result result = executeWithTimeout(call);
-                put(out, new AgentEvent.Tool(new ToolEvent(
-                        call.name(), preview(call.args()), Phase.END, result.content(), result.isError())));
-                results.add(new ToolResult(call.id(), result.content(), result.isError()));
+        int unknownRun = 0;
+        for (int iter = 1; iter <= MAX_ITERATIONS; iter++) {
+            if (!emit(out, cancel, new AgentEvent.Iter(iter))) {
+                ensureAssistantTail(conv, NOTICE_CANCELLED);
+                return;
+            }
+
+            // 请求：流式收集本轮响应（双路——文本实时转发 + 完整调用收集）
+            StreamOutcome once = streamOnce(conv, defs, suffix, cancel, out);
+            if (once.failed()) {
+                // 取消优先于流错误
+                ensureAssistantTail(conv, cancel.isCancelled() ? NOTICE_CANCELLED : NOTICE_STREAM_ERR);
+                return;
+            }
+            if (once.usage() != null) {
+                emit(out, cancel, new AgentEvent.UsageReport(
+                        new Usage(once.usage().inputTokens(), once.usage().outputTokens())));
+            }
+
+            // 自然完成：无工具调用的纯文本即最终答复（F2-1）
+            if (once.calls().isEmpty()) {
+                conv.addAssistantMessage(ensureFinal(out, cancel, once.text()));
+                return;
+            }
+
+            // 有工具调用：记历史 → 分批执行 → 结果回灌（含已取消占位，F6）
+            conv.addAssistantWithToolCalls(once.text(), once.calls());
+            unknownRun = allUnknown(once.calls()) ? unknownRun + 1 : 0;
+            BatchOutcome batch = executeBatched(once.calls(), cancel, out);
+            conv.addToolResults(batch.results());
+
+            // 执行中取消是最高优先级终止——跳过未知工具与上限检查
+            if (!batch.completed()) {
+                ensureAssistantTail(conv, NOTICE_CANCELLED);
+                return;
+            }
+            if (unknownRun >= MAX_UNKNOWN_RUN) {
+                emit(out, cancel, new AgentEvent.Notice(NOTICE_UNKNOWN_TOOLS));
+                ensureAssistantTail(conv, NOTICE_UNKNOWN_TOOLS);
+                return;
             }
         }
-        conv.addToolResults(results);
-
-        // ── 请求#2：续答。忽略其再次请求的工具调用（单轮上限，AC9）──
-        Once second = streamOnce(conv, defs, out);
-        if (second.error() != null) {
-            put(out, new AgentEvent.Failed(second.error()));
-            return;
-        }
-        String finalText = second.text().isBlank()
-                ? "（工具结果已回灌；本章为单轮工具模式，不再发起新一轮工具调用。）"
-                : second.text();
-        if (second.text().isBlank()) {
-            // 续答为空时 UI 也展示占位提示，避免答复区空白
-            put(out, new AgentEvent.Text(finalText));
-        }
-        conv.addAssistantMessage(finalText);
-        put(out, new AgentEvent.Done());
+        // 循环走完 = 触达迭代上限（F2-2）
+        emit(out, cancel, new AgentEvent.Notice(NOTICE_MAX_ITER));
+        ensureAssistantTail(conv, NOTICE_MAX_ITER);
     }
 
-    /** 注册中心执行 + 外层超时兜底：超时/执行异常都包成 error 结果回灌，不中断会话。 */
-    private Result executeWithTimeout(ToolCall call) throws InterruptedException {
-        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            Future<Result> future = executor.submit(() -> registry.execute(call.name(), call.args()));
+    // ─── 流式收集（双路）───
+
+    private record StreamOutcome(String text, List<ToolCall> calls, com.cortex.llm.Usage usage, boolean failed) {}
+
+    /** 一次流式请求：转发文本增量、收集完整工具调用、记录用量，直到流结束。 */
+    private StreamOutcome streamOnce(ConversationManager conv, List<ToolDef> defs, String suffix,
+                                     CancelToken cancel, BlockingQueue<AgentEvent> out)
+            throws InterruptedException {
+        StringBuilder text = new StringBuilder();
+        List<ToolCall> calls = new ArrayList<>();
+        com.cortex.llm.Usage usage = null;
+        BlockingQueue<StreamEvent> queue = client.stream(conv, defs, suffix);
+        while (true) {
+            if (cancel.isCancelled()) {
+                // 用户取消：立即停止消费当前流（底层请求尽力而为），由 loop 按取消路径收尾
+                return new StreamOutcome(text.toString(), calls, usage, true);
+            }
+            StreamEvent ev = queue.poll(200, TimeUnit.MILLISECONDS);
+            if (ev == null) {
+                continue;
+            }
+            switch (ev) {
+                case StreamEvent.TextDelta d -> {
+                    text.append(d.text());
+                    emit(out, cancel, new AgentEvent.Text(d.text()));
+                }
+                case StreamEvent.ToolCallComplete c ->
+                        calls.add(new ToolCall(c.toolId(), c.toolName(), c.arguments()));
+                case StreamEvent.UsageEvent u -> usage = u.usage();
+                case StreamEvent.StreamEnd s -> {
+                    // 取消视为失败，由 loop 按取消路径收尾
+                    return new StreamOutcome(text.toString(), calls, usage, cancel.isCancelled());
+                }
+                case StreamEvent.Error e -> {
+                    emit(out, cancel, new AgentEvent.Failed(e.message()));
+                    return new StreamOutcome(text.toString(), calls, usage, true);
+                }
+                case StreamEvent.ThinkingDelta ignored -> {
+                    // thinking 增量接收即丢弃
+                }
+            }
+        }
+    }
+
+    // ─── 保序分批并发执行（F5）───
+
+    private record BatchOutcome(List<ToolResult> results, boolean completed) {}
+
+    /**
+     * 按模型调用顺序扫描：连续只读调用合并为并发批，有副作用调用单独串行。
+     * 事件时序：Start 按调用序先发，End 也按调用序后发——并发只发生在执行环节，
+     * UI 看到的顺序始终是调用序（N3）。每个工具受 per-tool 超时约束（N1）。
+     */
+    private BatchOutcome executeBatched(List<ToolCall> calls, CancelToken cancel, BlockingQueue<AgentEvent> out)
+            throws InterruptedException {
+        ToolResult[] results = new ToolResult[calls.size()];
+        int i = 0;
+        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            while (i < calls.size()) {
+                if (cancel.isCancelled()) {
+                    for (int k = i; k < calls.size(); k++) {
+                        results[k] = new ToolResult(calls.get(k).id(), NOTICE_CANCELLED, true);
+                    }
+                    return new BatchOutcome(List.of(results), false);
+                }
+                ToolCall call = calls.get(i);
+                if (registry.isReadOnly(call.name())) {
+                    i = executeReadOnlyBatch(calls, i, executor, cancel, out, results);
+                } else {
+                    i = executeSingle(calls, i, executor, cancel, out, results);
+                }
+            }
+        }
+        return new BatchOutcome(List.of(results), true);
+    }
+
+    /** 并发执行 [from, to) 内的连续只读调用；返回段尾下标。 */
+    private int executeReadOnlyBatch(List<ToolCall> calls, int from, ExecutorService executor,
+                                     CancelToken cancel, BlockingQueue<AgentEvent> out, ToolResult[] results)
+            throws InterruptedException {
+        int to = from;
+        while (to < calls.size() && registry.isReadOnly(calls.get(to).name())) {
+            to++;
+        }
+        // Start 事件按调用序先发（动态区同时列出多个在执行的工具行）
+        for (int k = from; k < to; k++) {
+            emit(out, cancel, toolEvent(calls.get(k), Phase.START, "", false));
+        }
+        List<Future<Result>> futures = new ArrayList<>();
+        for (int k = from; k < to; k++) {
+            ToolCall c = calls.get(k);
+            futures.add(executor.submit(() -> registry.execute(c.name(), c.args())));
+        }
+        // End 事件按调用序逐个落 scrollback；只写各自下标，无竞争（N6）
+        for (int k = from; k < to; k++) {
+            Result r;
+            if (cancel.isCancelled()) {
+                futures.get(k - from).cancel(true);
+                r = Result.error(NOTICE_CANCELLED);
+            } else {
+                r = await(futures.get(k - from), cancel);
+            }
+            results[k] = new ToolResult(calls.get(k).id(), r.content(), r.isError());
+            emit(out, cancel, toolEvent(calls.get(k), Phase.END, r.content(), r.isError()));
+        }
+        return to;
+    }
+
+    /** 串行执行单个有副作用调用；返回下一个下标。 */
+    private int executeSingle(List<ToolCall> calls, int i, ExecutorService executor,
+                              CancelToken cancel, BlockingQueue<AgentEvent> out, ToolResult[] results)
+            throws InterruptedException {
+        ToolCall call = calls.get(i);
+        emit(out, cancel, toolEvent(call, Phase.START, "", false));
+        Future<Result> future = executor.submit(() -> registry.execute(call.name(), call.args()));
+        Result r = await(future, cancel);
+        results[i] = new ToolResult(call.id(), r.content(), r.isError());
+        emit(out, cancel, toolEvent(call, Phase.END, r.content(), r.isError()));
+        return i + 1;
+    }
+
+    /** per-tool 超时 + 取消感知的结果等待。 */
+    private Result await(Future<Result> future, CancelToken cancel) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + ToolRegistry.DEFAULT_TIMEOUT.toMillis();
+        while (true) {
             try {
-                return future.get(ToolRegistry.DEFAULT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-            } catch (TimeoutException e) {
-                future.cancel(true);
-                return Result.error("工具执行超时");
+                return future.get(100, TimeUnit.MILLISECONDS);
+            } catch (TimeoutException te) {
+                if (cancel.isCancelled()) {
+                    future.cancel(true);
+                    return Result.error(NOTICE_CANCELLED);
+                }
+                if (System.currentTimeMillis() > deadline) {
+                    future.cancel(true);
+                    return Result.error("工具执行超时");
+                }
             } catch (ExecutionException e) {
                 Throwable cause = e.getCause();
                 return Result.error("工具执行异常: " + (cause != null ? cause.getMessage() : e.getMessage()));
@@ -116,36 +268,54 @@ public final class Agent {
         }
     }
 
-    /** 一次流式请求：转发文本增量、收集完整工具调用，直到流结束。 */
-    private Once streamOnce(ConversationManager conv, List<ToolDef> defs, BlockingQueue<AgentEvent> out)
-            throws InterruptedException {
-        StringBuilder text = new StringBuilder();
-        List<ToolCall> calls = new ArrayList<>();
-        BlockingQueue<StreamEvent> queue = client.stream(conv, defs);
-        while (true) {
-            StreamEvent ev = queue.take();
-            if (ev instanceof StreamEvent.TextDelta d) {
-                text.append(d.text());
-                put(out, new AgentEvent.Text(d.text()));
-            } else if (ev instanceof StreamEvent.ToolCallComplete c) {
-                calls.add(new ToolCall(c.toolId(), c.toolName(), c.arguments()));
-            } else if (ev instanceof StreamEvent.StreamEnd) {
-                break;
-            } else if (ev instanceof StreamEvent.Error e) {
-                return new Once(text.toString(), calls, e.message());
-            }
-            // ThinkingDelta 接收即丢弃
-        }
-        return new Once(text.toString(), calls, null);
+    private AgentEvent.Tool toolEvent(ToolCall call, Phase phase, String result, boolean isError) {
+        return new AgentEvent.Tool(new ToolEvent(call.name(), preview(call.args()), phase, result, isError));
     }
 
-    private record Once(String text, List<ToolCall> calls, String error) {}
+    // ─── 辅助 ───
 
-    private static void put(BlockingQueue<AgentEvent> out, AgentEvent event) {
+    /** 发事件；per-turn 取消已触发时返回 false（调用方据此提前收尾）。 */
+    private static boolean emit(BlockingQueue<AgentEvent> bus, CancelToken cancel, AgentEvent event) {
+        if (cancel.isCancelled()) {
+            return false;
+        }
         try {
-            out.put(event);
+            bus.put(event);
+            return true;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
+    /** 不经取消检查直接投递（终止哨兵专用）。 */
+    private static void putDirect(BlockingQueue<AgentEvent> bus, AgentEvent event) {
+        try {
+            bus.put(event);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /** 连续未知工具判定：整轮全部调用都是未注册工具才计一次空转（混入已知工具即重置）。 */
+    private boolean allUnknown(List<ToolCall> calls) {
+        return calls.stream().noneMatch(c -> registry.get(c.name()).isPresent());
+    }
+
+    /** 最终答复非空原样返回；为空则发占位提示并返回占位文本（空 assistant 回合会破坏下一轮请求）。 */
+    private String ensureFinal(BlockingQueue<AgentEvent> out, CancelToken cancel, String text) {
+        if (text != null && !text.isBlank()) {
+            return text;
+        }
+        String placeholder = "（任务已完成。）";
+        emit(out, cancel, new AgentEvent.Text(placeholder));
+        return placeholder;
+    }
+
+    /** 保证历史以 assistant 文本回合收尾（取消/出错/上限后角色仍交替，下一轮请求不报 400，F6）。 */
+    private void ensureAssistantTail(ConversationManager conv, String fallback) {
+        if (conv.lastRole().orElse(null) != Message.Role.ASSISTANT) {
+            conv.addAssistantMessage(fallback);
         }
     }
 

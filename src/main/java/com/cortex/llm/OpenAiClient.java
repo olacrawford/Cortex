@@ -15,6 +15,7 @@ import com.openai.models.chat.completions.ChatCompletionMessageFunctionToolCall;
 import com.openai.models.chat.completions.ChatCompletionMessageParam;
 import com.openai.models.chat.completions.ChatCompletionMessageToolCall;
 import com.openai.models.chat.completions.ChatCompletionSystemMessageParam;
+import com.openai.models.chat.completions.ChatCompletionStreamOptions;
 import com.openai.models.chat.completions.ChatCompletionTool;
 import com.openai.models.chat.completions.ChatCompletionToolMessageParam;
 import com.openai.models.chat.completions.ChatCompletionUserMessageParam;
@@ -50,7 +51,7 @@ public class OpenAiClient implements LlmClient {
     }
 
     @Override
-    public BlockingQueue<StreamEvent> stream(ConversationManager conv, List<ToolDef> tools) {
+    public BlockingQueue<StreamEvent> stream(ConversationManager conv, List<ToolDef> tools, String systemSuffix) {
         BlockingQueue<StreamEvent> queue = new LinkedBlockingQueue<>();
         Thread.ofVirtual().name("openai-stream").start(() -> {
             try {
@@ -62,13 +63,15 @@ public class OpenAiClient implements LlmClient {
                 List<ChatCompletionMessageParam> messages = new ArrayList<>();
                 messages.add(ChatCompletionMessageParam.ofSystem(
                         ChatCompletionSystemMessageParam.builder()
-                                .content(systemPrompt)
+                                .content(effectiveSystem(systemSuffix))
                                 .build()));
                 messages.addAll(toOpenAIMessages(conv));
 
                 var paramsBuilder = ChatCompletionCreateParams.builder()
                         .model(config.getModel())
-                        .messages(messages);
+                        .messages(messages)
+                        // 不开 includeUsage 流式 usage 为空（F8）
+                        .streamOptions(ChatCompletionStreamOptions.builder().includeUsage(true).build());
                 if (tools != null && !tools.isEmpty()) {
                     paramsBuilder.tools(toOpenAITools(tools));
                 }
@@ -121,6 +124,7 @@ public class OpenAiClient implements LlmClient {
                     String args = frag.args.isEmpty() ? "{}" : frag.args.toString();
                     queue.put(new StreamEvent.ToolCallComplete(frag.id, frag.name, args));
                 }
+                queue.put(new StreamEvent.UsageEvent(new Usage(inputTokens, outputTokens)));
                 queue.put(new StreamEvent.StreamEnd("stop", inputTokens, outputTokens));
             } catch (Exception e) {
                 try {
@@ -132,6 +136,14 @@ public class OpenAiClient implements LlmClient {
     }
 
     // ─── 请求组装 ───
+
+    /** 内置系统提示 + 计划态后缀（后缀非空时拼为同一段文本）。 */
+    private String effectiveSystem(String systemSuffix) {
+        if (systemSuffix == null || systemSuffix.isEmpty()) {
+            return systemPrompt;
+        }
+        return systemPrompt + "\n\n" + systemSuffix;
+    }
 
     private List<ChatCompletionTool> toOpenAITools(List<ToolDef> defs) {
         List<ChatCompletionTool> result = new ArrayList<>();

@@ -17,6 +17,9 @@ public interface Tool {
     /** 手写 JSON Schema（type/properties/required），随请求发送给模型。 */
     Map<String, Object> inputSchema();
 
+    /** true=只读工具：可与其他只读工具并发执行，Plan Mode 下唯一放行的类别。 */
+    boolean readOnly();
+
     /**
      * 执行工具。
      *

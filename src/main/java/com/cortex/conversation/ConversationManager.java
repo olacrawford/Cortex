@@ -6,6 +6,7 @@ import com.cortex.llm.ToolResult;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * 对话历史管理：维护消息序列，供 LLM 请求组装上下文。
@@ -35,6 +36,14 @@ public class ConversationManager {
 
     public List<Message> getMessages() {
         return Collections.unmodifiableList(messages);
+    }
+
+    /** 最后一条消息的角色；空历史返回 empty。用于终止收尾时判断历史尾巴。 */
+    public Optional<Message.Role> lastRole() {
+        if (messages.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(messages.get(messages.size() - 1).getRole());
     }
 
     public void clear() {

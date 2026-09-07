@@ -2,6 +2,8 @@ package com.cortex.tui;
 
 import com.cortex.agent.Agent;
 import com.cortex.agent.AgentEvent;
+import com.cortex.agent.CancelToken;
+import com.cortex.agent.Mode;
 import com.cortex.agent.Phase;
 import com.cortex.agent.ToolEvent;
 import com.cortex.config.ProviderConfig;
@@ -58,10 +60,17 @@ public class CortexModel implements Model {
     private boolean streaming;
     private StringBuilder streamBuf = new StringBuilder();
     private BlockingQueue<AgentEvent> agentQueue;
-    private ToolDisplay curTool;
+    private final List<ToolDisplay> curTools = new ArrayList<>();
+    private CancelToken turnCancel;
     private long requestStartMs;
     private long tickCounter;
     private boolean doneAtLeastOnce;
+
+    // Agent Loop 状态
+    private Mode mode = Mode.NORMAL;
+    private int iter;
+    private long usageIn;
+    private long usageOut;
 
     /** 已提交（渲染定型并写入 scrollback）的消息列表，用于退出时 dumpHistory。 */
     private final List<String> committed = new ArrayList<>();
@@ -121,7 +130,20 @@ public class CortexModel implements Model {
     private UpdateResult<? extends Model> onKey(KeyPressMessage key) {
         switch (key.key()) {
             case "ctrl+c" -> {
+                // 流式态：取消本轮、回空闲态、不退出（F7）；其余状态退出程序
+                if (streaming) {
+                    if (turnCancel != null) {
+                        turnCancel.cancel();
+                    }
+                    return new UpdateResult<>(this, null);
+                }
                 return new UpdateResult<>(this, Command.quit());
+            }
+            case "esc" -> {
+                if (streaming && turnCancel != null) {
+                    turnCancel.cancel();
+                }
+                return new UpdateResult<>(this, null);
             }
             case "up", "left" -> {
                 if (state == AppState.PROVIDER_SELECT) {
@@ -186,17 +208,38 @@ public class CortexModel implements Model {
             return new UpdateResult<>(this, Command.quit());
         }
 
+        // Plan Mode 两段式（F10）
+        if (text.equals("/plan")) {
+            mode = Mode.PLAN;
+            String hint = Styles.MUTED.apply("⊕ 已进入计划模式：模型仅可用只读工具产出计划，用 /do 批准执行");
+            committed.add(hint);
+            return new UpdateResult<>(this, Command.println(hint));
+        }
+        if (text.equals("/do")) {
+            mode = Mode.NORMAL;
+            conversation.addUserMessage(PromptBuilder.EXECUTE_DIRECTIVE);
+            String doLine = Styles.USER_PREFIX.apply("❯ ") + PromptBuilder.EXECUTE_DIRECTIVE;
+            committed.add(doLine);
+            return startTurn(doLine);
+        }
+
         conversation.addUserMessage(text);
         String userLine = Styles.USER_PREFIX.apply("❯ ") + text;
         committed.add(userLine);
+        return startTurn(userLine);
+    }
 
+    /** 启动一轮 Agent Loop：per-turn 取消句柄 + 事件队列 + tick 轮询。 */
+    private UpdateResult<? extends Model> startTurn(String userLine) {
         streamBuf = new StringBuilder();
-        curTool = null;
+        curTools.clear();
+        iter = 0;
         streaming = true;
         requestStartMs = System.currentTimeMillis();
         tickCounter = 0;
-        // Agent 虚拟线程内完成「请求#1 → 执行工具 → 结果回灌 → 请求#2」整条链路
-        agentQueue = new Agent(client, registry).run(conversation);
+        turnCancel = new CancelToken();
+        // Agent 虚拟线程内跑 ReAct 循环（请求 → 工具 → 回灌 → 下一轮……直到停止条件）
+        agentQueue = new Agent(client, registry).run(conversation, mode, turnCancel);
 
         return new UpdateResult<>(this, Command.batch(
                 Command.println(userLine),
@@ -218,6 +261,16 @@ public class CortexModel implements Model {
                 switch (ev) {
                     case AgentEvent.Text delta -> streamBuf.append(delta.delta());
                     case AgentEvent.Tool tool -> turnOver |= handleToolEvent(tool, outputs);
+                    case AgentEvent.UsageReport u -> {
+                        usageIn += u.usage().inputTokens();
+                        usageOut += u.usage().outputTokens();
+                    }
+                    case AgentEvent.Iter i -> iter = i.iter();
+                    case AgentEvent.Notice n -> {
+                        String line = Styles.MUTED.apply("⊕ " + n.message());
+                        committed.add(line);
+                        outputs.add(Command.println(line));
+                    }
                     case AgentEvent.Done done -> {
                         outputs.addAll(finishTurn());
                         turnOver = true;
@@ -245,7 +298,7 @@ public class CortexModel implements Model {
         return new UpdateResult<>(this, Command.tick(POLL_INTERVAL, t -> new StreamTickMessage()));
     }
 
-    /** 工具事件：START 把已流出的 preamble 定型并显示执行指示；END 提交工具行与结果摘要。 */
+    /** 工具事件：START 把已流出的 preamble 定型并挂执行指示；END 按序弹出队首工具、提交工具行与结果摘要。 */
     private boolean handleToolEvent(AgentEvent.Tool tool, List<Command> outputs) {
         ToolEvent event = tool.event();
         if (event.phase() == Phase.START) {
@@ -255,36 +308,56 @@ public class CortexModel implements Model {
                 outputs.add(Command.println(preamble));
                 streamBuf = new StringBuilder();
             }
-            curTool = new ToolDisplay(event.name(), event.args());
+            curTools.add(new ToolDisplay(event.name(), event.args()));
         } else {
-            String line = toolLine(event.name(), event.args());
+            // Agent 保证 START/END 都按调用序发出，弹队首即对应工具（重名也不会错位）
+            ToolDisplay started = curTools.isEmpty() ? new ToolDisplay(event.name(), event.args()) : curTools.remove(0);
+            String line = toolLine(started.name(), started.args());
             String summary = toolResultSummary(event.result(), event.isError());
             committed.add(line);
             committed.add(summary);
             outputs.add(Command.println(line));
             outputs.add(Command.println(summary));
-            curTool = null;
         }
         return false;
     }
 
-    /** 最终答复定型：markdown 渲染 + 耗时后缀，写入 scrollback。 */
+    /** 本轮结束定型：把累计文本（最终答复或被取消时的部分文本）渲染落 scrollback。幂等。 */
     private List<Command> finishTurn() {
-        long elapsedMs = System.currentTimeMillis() - requestStartMs;
-        String rendered = MarkdownRenderer.render(streamBuf.toString(), width);
-        String block = Styles.ASSISTANT_PREFIX.apply("● ") + rendered + elapsedSuffix(elapsedMs);
-        committed.add(block);
-        streamBuf = new StringBuilder();
-        streaming = false;
-        return List.of(Command.println(block), Command.println(separatorLine()));
+        if (!streaming) {
+            return List.of();
+        }
+        List<Command> outs = new ArrayList<>();
+        if (!streamBuf.isEmpty()) {
+            long elapsedMs = System.currentTimeMillis() - requestStartMs;
+            String block = Styles.ASSISTANT_PREFIX.apply("● ")
+                    + MarkdownRenderer.render(streamBuf.toString(), width) + elapsedSuffix(elapsedMs);
+            committed.add(block);
+            outs.add(Command.println(block));
+        }
+        resetTurnState();
+        outs.add(Command.println(separatorLine()));
+        return outs;
     }
 
     private List<Command> handleError(String message) {
-        streaming = false;
-        curTool = null;
+        if (!streaming) {
+            return List.of();
+        }
         String errorLine = Styles.ERROR.apply("✖ 请求失败：") + message;
         committed.add(errorLine);
+        resetTurnState();
         return List.of(Command.println(errorLine), Command.println(separatorLine()));
+    }
+
+    /** 回空闲态；mode 与累计用量跨轮保留。 */
+    private void resetTurnState() {
+        streaming = false;
+        streamBuf = new StringBuilder();
+        curTools.clear();
+        iter = 0;
+        turnCancel = null;
+        agentQueue = null;
     }
 
     // ─── 工具行渲染（Claude Code 风格）───
@@ -352,18 +425,21 @@ public class CortexModel implements Model {
             long elapsed = System.currentTimeMillis() - requestStartMs;
             int seconds = (int) (elapsed / 1000);
             char frame = SpinnerVerbs.frameAt(tickCounter);
-            if (curTool != null) {
-                // 工具执行中：显示工具行 + Running…，界面持续刷新不冻结（N2）
-                sb.append(Styles.SPINNER.apply(String.valueOf(frame))
-                        .concat(" " + Styles.TOOL_MARK.apply("● ")
-                                + Styles.TOOL_NAME.apply(curTool.name())
-                                + Styles.MUTED.apply("(" + curTool.args() + ")"))
-                        .concat("  Running… (" + seconds + "s)"))
-                        .append("\r\n\r\n");
+            String roundSuffix = iter > 0 ? " · 第 " + iter + " 轮" : "";
+            if (!curTools.isEmpty()) {
+                // 并发批：逐行列出在执行的工具（N2：界面持续刷新不冻结）
+                for (ToolDisplay t : curTools) {
+                    sb.append(Styles.SPINNER.apply(String.valueOf(frame))
+                            .concat(" " + Styles.TOOL_MARK.apply("● ")
+                                    + Styles.TOOL_NAME.apply(t.name())
+                                    + Styles.MUTED.apply("(" + t.args() + ")")))
+                            .append("\r\n");
+                }
+                sb.append(Styles.SPINNER.apply("  Running… (" + seconds + "s)")).append("\r\n\r\n");
             } else {
                 String verb = SpinnerVerbs.pick(elapsed);
                 sb.append(Styles.SPINNER.apply(String.valueOf(frame))
-                        .concat(" " + verb + "… (" + seconds + "s)"))
+                        .concat(" " + verb + "… (" + seconds + "s" + roundSuffix + ")"))
                         .append("\r\n\r\n");
                 sb.append(streamBuf);
                 sb.append("\r\n");
@@ -385,13 +461,30 @@ public class CortexModel implements Model {
 
     private String statusBar() {
         String providerName = activeProvider != null ? activeProvider.getName() : "";
+        if (mode == Mode.PLAN) {
+            providerName += " [PLAN]";
+        }
         String model = activeProvider != null ? activeProvider.getModel() : "";
+        if (usageIn > 0 || usageOut > 0) {
+            model += "  ↑" + compact(usageIn) + " ↓" + compact(usageOut) + " tok";
+        }
         String left = Styles.STATUS_PROVIDER.apply(providerName);
         String right = Styles.STATUS_MODEL.apply(model);
         int usable = Math.max(width - 2, 1);
         int leftLen = left.replaceAll("\u001B\\[[0-9;]*m", "").length();
         String pad = " ".repeat(Math.max(1, usable - leftLen - right.replaceAll("\u001B\\[[0-9;]*m", "").length()));
         return left + pad + right;
+    }
+
+    /** 用量紧凑格式（如 1.2k）。 */
+    private static String compact(long n) {
+        if (n >= 1_000_000) {
+            return "%.1fM".formatted(n / 1_000_000.0);
+        }
+        if (n >= 1_000) {
+            return "%.1fk".formatted(n / 1_000.0);
+        }
+        return String.valueOf(n);
     }
 
     private String bannerBlock() {

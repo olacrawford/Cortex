@@ -44,6 +44,11 @@ public final class BashTool implements Tool {
     }
 
     @Override
+    public boolean readOnly() {
+        return false; // bash 可执行任意副作用命令，保守归为有副作用、串行执行
+    }
+
+    @Override
     public Map<String, Object> inputSchema() {
         Map<String, Object> command = new LinkedHashMap<>();
         command.put("type", "string");
