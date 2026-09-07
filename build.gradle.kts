@@ -11,7 +11,7 @@ java {
 }
 
 application {
-    mainClass = "com.mewcode.MewCode"
+    mainClass = "com.cortex.Cortex"
 }
 
 repositories {
@@ -39,7 +39,7 @@ tasks.withType<Test> {
 }
 
 tasks.named<com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar>("shadowJar") {
-    archiveBaseName = "mewcode"
+    archiveBaseName = "cortex"
     archiveClassifier = ""
     mergeServiceFiles()
     isZip64 = true

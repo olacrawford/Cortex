@@ -1,8 +1,8 @@
 # 我的初步想法
 
-我要从零开始做一个命令行AI助手(Coding Agent)，叫MewCode，类似ClaudeCode。用[java]开发。
+我要从零开始做一个命令行AI助手(Coding Agent)，叫Cortex，类似ClaudeCode。用[java]开发。
 
-这一步的目标是：用户在终端启动MewCode后，进入一个交互式对话界面（TUI），可以输入问题，MewCode调用大模型API，把回复流式地
+这一步的目标是：用户在终端启动Cortex后，进入一个交互式对话界面（TUI），可以输入问题，Cortex调用大模型API，把回复流式地
 逐字打印出来。支持多轮对话，AI能记住之前说过的话。
 技术要求：
 支持AnthropicClaude和OpenAI两种API后端，通过配置文件切换流式用SSE，不是等全部生成完再返回
