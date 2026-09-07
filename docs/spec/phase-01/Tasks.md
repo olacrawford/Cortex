@@ -1,41 +1,41 @@
 # 多协议 LLM 终端对话客户端 Tasks
 
-> 顶层包：`com.mewcode`（Java 21 / Gradle）。构建产物在 `build/libs/mewcode.jar`。
+> 顶层包：`com.cortex`（Java 21 / Gradle）。构建产物在 `build/libs/cortex.jar`。
 
 ## 文件清单
 
 | 操作 | 文件 | 职责 |
 |------|------|------|
 | 新建 | `build.gradle.kts` | Gradle 构建、JDK 21、依赖、Shadow plugin |
-| 新建 | `.mewcode/config.yaml.example` | 配置模板 |
-| 修改 | `.gitignore` | 忽略 `.mewcode/config.yaml`、`build/` |
-| 新建 | `src/main/java/com/mewcode/config/AppConfig.java` | 配置根类 |
-| 新建 | `src/main/java/com/mewcode/config/ProviderConfig.java` | provider 配置 |
-| 新建 | `src/main/java/com/mewcode/config/ConfigLoader.java` | YAML 加载与校验 |
-| 新建 | `src/main/java/com/mewcode/prompt/PromptBuilder.java` | system prompt 构建 |
-| 新建 | `src/main/java/com/mewcode/llm/StreamEvent.java` | sealed StreamEvent |
-| 新建 | `src/main/java/com/mewcode/llm/LlmClient.java` | 统一接口 + 工厂 |
-| 新建 | `src/main/java/com/mewcode/conversation/ConversationManager.java` | 多轮历史 |
-| 新建 | `src/main/java/com/mewcode/conversation/Message.java` | 消息类型 |
-| 新建 | `src/main/java/com/mewcode/llm/AnthropicClient.java` | anthropic 适配器 |
-| 新建 | `src/main/java/com/mewcode/llm/OpenAiClient.java` | openai 适配器 |
-| 新建 | `src/main/java/com/mewcode/tui/tea/*.java` | Bubble Tea 框架（11 个文件） |
-| 新建 | `src/main/java/com/mewcode/tui/MewCodeModel.java` | 主 TUI 模型 |
-| 新建 | `src/main/java/com/mewcode/tui/Styles.java` | 全局样式 |
-| 新建 | `src/main/java/com/mewcode/tui/MarkdownRenderer.java` | Mordant markdown 渲染 |
-| 新建 | `src/main/java/com/mewcode/MewCode.java` | 入口装配 |
-| 新建 | `src/test/java/com/mewcode/config/ConfigLoaderTest.java` | config 单测 |
-| 新建 | `src/test/java/com/mewcode/conversation/ConversationTest.java` | conversation 单测 |
+| 新建 | `.cortex/config.yaml.example` | 配置模板 |
+| 修改 | `.gitignore` | 忽略 `.cortex/config.yaml`、`build/` |
+| 新建 | `src/main/java/com/cortex/config/AppConfig.java` | 配置根类 |
+| 新建 | `src/main/java/com/cortex/config/ProviderConfig.java` | provider 配置 |
+| 新建 | `src/main/java/com/cortex/config/ConfigLoader.java` | YAML 加载与校验 |
+| 新建 | `src/main/java/com/cortex/prompt/PromptBuilder.java` | system prompt 构建 |
+| 新建 | `src/main/java/com/cortex/llm/StreamEvent.java` | sealed StreamEvent |
+| 新建 | `src/main/java/com/cortex/llm/LlmClient.java` | 统一接口 + 工厂 |
+| 新建 | `src/main/java/com/cortex/conversation/ConversationManager.java` | 多轮历史 |
+| 新建 | `src/main/java/com/cortex/conversation/Message.java` | 消息类型 |
+| 新建 | `src/main/java/com/cortex/llm/AnthropicClient.java` | anthropic 适配器 |
+| 新建 | `src/main/java/com/cortex/llm/OpenAiClient.java` | openai 适配器 |
+| 新建 | `src/main/java/com/cortex/tui/tea/*.java` | Bubble Tea 框架（11 个文件） |
+| 新建 | `src/main/java/com/cortex/tui/CortexModel.java` | 主 TUI 模型 |
+| 新建 | `src/main/java/com/cortex/tui/Styles.java` | 全局样式 |
+| 新建 | `src/main/java/com/cortex/tui/MarkdownRenderer.java` | Mordant markdown 渲染 |
+| 新建 | `src/main/java/com/cortex/Cortex.java` | 入口装配 |
+| 新建 | `src/test/java/com/cortex/config/ConfigLoaderTest.java` | config 单测 |
+| 新建 | `src/test/java/com/cortex/conversation/ConversationTest.java` | conversation 单测 |
 
 ---
 
 ## T1: 初始化 Gradle 工程与依赖
-**文件：** `build.gradle.kts`、`src/main/java/com/mewcode/MewCode.java`（临时占位）
+**文件：** `build.gradle.kts`、`src/main/java/com/cortex/Cortex.java`（临时占位）
 **依赖：** 无
 **步骤：**
 1. 创建 `build.gradle.kts`：plugins `java`、`application`、`com.gradleup.shadow`；
    `java.toolchain.languageVersion = JavaLanguageVersion.of(21)`；
-   `application.mainClass = "com.mewcode.MewCode"`。
+   `application.mainClass = "com.cortex.Cortex"`。
 2. 加依赖：
    - TUI：`org.jline:jline`
    - markdown：`com.github.ajalt.mordant:mordant` + `mordant-markdown`
@@ -43,13 +43,13 @@
    - 配置：`org.yaml:snakeyaml`
    - JSON：`com.fasterxml.jackson.core:jackson-databind`
    - 测试：`org.junit.jupiter:junit-jupiter`（testImplementation）
-3. 配 `tasks.shadowJar`：`archiveBaseName = "mewcode"`、`mergeServiceFiles()`。
-4. 写临时 `MewCode.java`，`main` 打印版本字符串。
+3. 配 `tasks.shadowJar`：`archiveBaseName = "cortex"`、`mergeServiceFiles()`。
+4. 写临时 `Cortex.java`，`main` 打印版本字符串。
 
-**验证：** `./gradlew shadowJar` 成功；`java -jar build/libs/mewcode.jar` 打印版本。
+**验证：** `./gradlew shadowJar` 成功；`java -jar build/libs/cortex.jar` 打印版本。
 
 ## T2: config 包
-**文件：** `src/main/java/com/mewcode/config/{AppConfig,ProviderConfig,ConfigLoader}.java`
+**文件：** `src/main/java/com/cortex/config/{AppConfig,ProviderConfig,ConfigLoader}.java`
 **依赖：** T1
 **步骤：**
 1. 定义 `ProviderConfig`（POJO，getter/setter）：name、protocol、baseUrl、apiKey、model、thinking。
@@ -63,25 +63,25 @@
 **验证：** 单测 `ConfigLoaderTest`；`./gradlew test --tests '*ConfigLoaderTest'`。
 
 ## T3: 配置模板与忽略
-**文件：** `.mewcode/config.yaml.example`、`.gitignore`
+**文件：** `.cortex/config.yaml.example`、`.gitignore`
 **依赖：** T2
 **步骤：**
-1. 写 `.mewcode/config.yaml.example`：含 anthropic 条目（`thinking: true`）+ 注释掉的 openai 条目。
-2. `.gitignore` 追加 `.mewcode/config.yaml`、`build/`、`.gradle/`、`.idea/`。
+1. 写 `.cortex/config.yaml.example`：含 anthropic 条目（`thinking: true`）+ 注释掉的 openai 条目。
+2. `.gitignore` 追加 `.cortex/config.yaml`、`build/`、`.gradle/`、`.idea/`。
 
 **验证：** 复制 example 为 config.yaml 后 `ConfigLoader.load` 通过。
 
 ## T4: prompt 包
-**文件：** `src/main/java/com/mewcode/prompt/PromptBuilder.java`
+**文件：** `src/main/java/com/cortex/prompt/PromptBuilder.java`
 **依赖：** T1
 **步骤：**
 1. 实现 `buildSystemPrompt(env, options)` 拼接系统提示词各段。
-2. banner 渲染在 MewCodeModel 内联实现（`renderBanner()` 方法）。
+2. banner 渲染在 CortexModel 内联实现（`renderBanner()` 方法）。
 
 **验证：** `./gradlew compileJava`。
 
 ## T5: llm 包骨架
-**文件：** `src/main/java/com/mewcode/llm/{StreamEvent,LlmClient}.java`
+**文件：** `src/main/java/com/cortex/llm/{StreamEvent,LlmClient}.java`
 **依赖：** T2
 **步骤：**
 1. 定义 `sealed interface StreamEvent`：TextDelta、ThinkingDelta、StreamEnd、Error 等。
@@ -91,7 +91,7 @@
 **验证：** `./gradlew compileJava`。
 
 ## T6: conversation 包
-**文件：** `src/main/java/com/mewcode/conversation/{ConversationManager,Message}.java`
+**文件：** `src/main/java/com/cortex/conversation/{ConversationManager,Message}.java`
 **依赖：** T5
 **步骤：**
 1. 定义 `Message`（role、content、工具调用块等）。
@@ -100,7 +100,7 @@
 **验证：** 单测 `ConversationTest`；`./gradlew test --tests '*ConversationTest'`。
 
 ## T7: anthropic 适配器
-**文件：** `src/main/java/com/mewcode/llm/AnthropicClient.java`
+**文件：** `src/main/java/com/cortex/llm/AnthropicClient.java`
 **依赖：** T5、T4
 **步骤：**
 1. 构造 SDK client：`AnthropicClient.builder().apiKey(...).build()`；baseUrl 覆盖。
@@ -111,7 +111,7 @@
 **验证：** `./gradlew compileJava`。
 
 ## T8: openai 适配器
-**文件：** `src/main/java/com/mewcode/llm/OpenAiClient.java`
+**文件：** `src/main/java/com/cortex/llm/OpenAiClient.java`
 **依赖：** T5、T4
 **步骤：**
 1. 类似 T7 模式，用 openai-java SDK 的流式 API。
@@ -120,7 +120,7 @@
 **验证：** `./gradlew compileJava`。
 
 ## T9: tui.tea 框架层
-**文件：** `src/main/java/com/mewcode/tui/tea/*.java`（11 个文件）
+**文件：** `src/main/java/com/cortex/tui/tea/*.java`（11 个文件）
 **依赖：** T1
 **步骤：**
 1. 实现 `Message` 接口、`KeyPressMessage`、`WindowSizeMessage`、`QuitMessage`、`MouseMessage`。
@@ -134,11 +134,11 @@
 
 **验证：** `./gradlew compileJava`；写临时 Model 测试 Program 启动退出。
 
-## T10: tui MewCodeModel
-**文件：** `src/main/java/com/mewcode/tui/{MewCodeModel,Styles,AppState,ChatMessage,SpinnerVerbs,MarkdownRenderer}.java`
+## T10: tui CortexModel
+**文件：** `src/main/java/com/cortex/tui/{CortexModel,Styles,AppState,ChatMessage,SpinnerVerbs,MarkdownRenderer}.java`
 **依赖：** T9、T5、T6、T2
 **步骤：**
-1. 实现 `MewCodeModel implements Model`：状态机（PROVIDER_SELECT/CHAT/RESUME）。
+1. 实现 `CortexModel implements Model`：状态机（PROVIDER_SELECT/CHAT/RESUME）。
 2. `init()` → `Command.checkWindowSize()`。
 3. `update(msg)` 处理：WindowSize、KeyPress（输入/提交/slash/方向键/Ctrl+C）、AgentEvent、鼠标。
 4. `view()` 渲染：banner + 未提交消息 + 工具块 + 流式缓冲 + spinner
@@ -149,10 +149,10 @@
 **验证：** `./gradlew compileJava`。
 
 ## T11: 入口装配
-**文件：** `src/main/java/com/mewcode/MewCode.java`（替换 T1 占位）
+**文件：** `src/main/java/com/cortex/Cortex.java`（替换 T1 占位）
 **依赖：** T2、T9、T10
 **步骤：**
-1. 加载配置 → 创建 MewCodeModel → 创建 Program → `program.run()`。
+1. 加载配置 → 创建 CortexModel → 创建 Program → `program.run()`。
 2. 支持 `-p "prompt"` 非交互模式和 `--remote` 模式。
 3. SIGINT handler 注册。
 
