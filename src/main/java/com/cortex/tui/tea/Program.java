@@ -93,6 +93,9 @@ public class Program {
         KeyMap<KeyPressMessage> keymap = buildKeyMap();
         KeyPressMessage printable = new KeyPressMessage("\u0000PRINTABLE\u0000", new char[0]);
         keymap.setUnicode(printable);
+        // Latin-1 内的未绑定字符（ASCII 字母/数字等）走 nomatch 兜底，
+        // 否则会被 BindingReader 静默丢弃（unicode 回退只覆盖码点 >= KEYMAP_LENGTH 的字符）
+        keymap.setNomatch(printable);
 
         while (running.get()) {
             try {
@@ -223,7 +226,8 @@ public class Program {
     private void clearView() {
         if (linesRendered > 0) {
             StringBuilder sb = new StringBuilder();
-            sb.append("\u001b[").append(linesRendered).append("A");
+            // 光标停在视图最后一行的行尾，上移 N-1 行即回到视图首行；多移一行会擦掉视图上方的 scrollback
+            sb.append("\u001b[").append(linesRendered - 1).append("A");
             sb.append("\r");
             sb.append("\u001b[J");
             terminal.writer().print(sb.toString());

@@ -3,11 +3,12 @@ package com.cortex;
 import com.cortex.config.AppConfig;
 import com.cortex.config.ConfigException;
 import com.cortex.config.ConfigLoader;
+import com.cortex.tool.ToolRegistry;
 import com.cortex.tui.CortexModel;
 import com.cortex.tui.tea.Program;
 
 /**
- * Cortex 入口：加载配置，启动 TUI。
+ * Cortex 入口：加载配置，构造工具注册中心，启动 TUI。
  */
 public class Cortex {
 
@@ -15,7 +16,8 @@ public class Cortex {
         String configPath = ".cortex/config.yaml";
         try {
             AppConfig config = ConfigLoader.load(configPath);
-            CortexModel model = new CortexModel(config.getProviders());
+            ToolRegistry registry = ToolRegistry.createDefault();
+            CortexModel model = new CortexModel(config.getProviders(), registry);
             Program program = new Program(model);
             model.setProgram(program);
             program.run();
