@@ -42,4 +42,14 @@ public final class Styles {
 
     public static final Style SELECT_IDLE =
             Style.none().fg(ANSI256Color.BRIGHT_BLACK);
+
+    // ─── 工具行（Claude Code 风格：● name(args) + 缩进结果摘要）───
+    public static final Style TOOL_MARK =
+            Style.none().fg(ANSI256Color.BRIGHT_CYAN).bold();
+
+    public static final Style TOOL_NAME =
+            Style.none().fg(ANSI256Color.BRIGHT_GREEN);
+
+    public static final Style TOOL_RESULT =
+            Style.none().fg(ANSI256Color.BRIGHT_BLACK);
 }
