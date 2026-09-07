@@ -5,6 +5,16 @@ import java.lang.management.OperatingSystemMXBean;
 
 public class PromptBuilder {
 
+    /** Plan Mode 系统提示后缀：计划态只允许只读工具，产出计划后停下等 /do。 */
+    public static final String PLAN_MODE_REMINDER =
+            "You are currently in PLAN MODE. You may use ONLY the read-only tools "
+                    + "(read_file, glob, grep) to investigate the codebase. You must NOT write files, "
+                    + "edit files, or run shell commands. Produce a clear, step-by-step plan for the task, "
+                    + "then stop and wait for the user to approve it with /do before doing any work.";
+
+    /** /do 注入的用户消息：指示模型按上文已确认的计划开始执行。 */
+    public static final String EXECUTE_DIRECTIVE = "请按上面的计划开始执行。";
+
     public static String buildSystemPrompt() {
         OperatingSystemMXBean os = ManagementFactory.getOperatingSystemMXBean();
 
@@ -22,9 +32,10 @@ public class PromptBuilder {
                ## 工具使用约定
                1. 需要了解文件内容、执行操作或查找代码时，主动调用相应工具，不要凭空猜测
                2. 调用工具前可先用一句话说明你要做什么
-               3. 拿到工具结果后，基于真实结果给出简洁答复；工具报错时根据错误信息调整参数重试或如实说明
-               4. 修改文件优先用 edit_file 精确替换；新建文件用 write_file
-               5. 执行命令前考虑安全性，避免破坏性操作
+               3. 拿到工具结果后，基于真实结果继续推进：若任务未完成，继续调用下一个工具，不要停下来等用户确认
+               4. 跨多个步骤持续使用工具推进任务，直到任务完成后再给出最终的简洁答复
+               5. 修改文件优先用 edit_file 精确替换；新建文件用 write_file
+               6. 执行命令前考虑安全性，避免破坏性操作
 
                ## 行为准则
                1. 在生成代码/命令前，先理解用户的真实需求

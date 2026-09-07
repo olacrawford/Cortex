@@ -45,7 +45,7 @@ public class AnthropicClient implements LlmClient {
     private record ToolAcc(String id, String name, StringBuilder args) {}
 
     @Override
-    public BlockingQueue<StreamEvent> stream(ConversationManager conv, List<ToolDef> tools) {
+    public BlockingQueue<StreamEvent> stream(ConversationManager conv, List<ToolDef> tools, String systemSuffix) {
         BlockingQueue<StreamEvent> queue = new LinkedBlockingQueue<>();
         Thread.ofVirtual().name("anthropic-stream").start(() -> {
             try {
@@ -58,7 +58,7 @@ public class AnthropicClient implements LlmClient {
                 var paramsBuilder = MessageCreateParams.builder()
                         .model(config.getModel())
                         .maxTokens(8192)
-                        .system(systemPrompt);
+                        .system(effectiveSystem(systemSuffix));
 
                 if (tools != null && !tools.isEmpty()) {
                     paramsBuilder.tools(toAnthropicTools(tools));
@@ -118,7 +118,13 @@ public class AnthropicClient implements LlmClient {
                     String args = acc.args().isEmpty() ? "{}" : acc.args().toString();
                     queue.put(new StreamEvent.ToolCallComplete(acc.id(), acc.name(), args));
                 }
-                queue.put(end != null ? end : new StreamEvent.StreamEnd("stop", 0, 0));
+                if (end != null) {
+                    // 用量在 Done 之前一次性上抛（F8）
+                    queue.put(new StreamEvent.UsageEvent(new Usage(end.inputTokens(), end.outputTokens())));
+                    queue.put(end);
+                } else {
+                    queue.put(new StreamEvent.StreamEnd("stop", 0, 0));
+                }
             } catch (Exception e) {
                 try {
                     queue.put(new StreamEvent.Error(e.getMessage() != null ? e.getMessage() : e.toString()));
@@ -129,6 +135,14 @@ public class AnthropicClient implements LlmClient {
     }
 
     // ─── 请求组装 ───
+
+    /** 内置系统提示 + 计划态后缀（后缀非空时拼为同一段文本）。 */
+    private String effectiveSystem(String systemSuffix) {
+        if (systemSuffix == null || systemSuffix.isEmpty()) {
+            return systemPrompt;
+        }
+        return systemPrompt + "\n\n" + systemSuffix;
+    }
 
     private List<ToolUnion> toAnthropicTools(List<ToolDef> defs) {
         List<ToolUnion> result = new ArrayList<>();
