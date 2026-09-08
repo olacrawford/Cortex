@@ -26,6 +26,7 @@ dependencies {
     implementation("com.openai:openai-java:4.58.0")
     implementation("org.yaml:snakeyaml:2.4")
     implementation("com.fasterxml.jackson.core:jackson-databind:2.18.3")
+    implementation("io.modelcontextprotocol.sdk:mcp:1.1.3")
     testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
