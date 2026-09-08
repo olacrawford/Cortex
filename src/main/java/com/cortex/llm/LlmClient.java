@@ -1,26 +1,22 @@
 package com.cortex.llm;
 
 import com.cortex.config.ProviderConfig;
-import com.cortex.conversation.ConversationManager;
 
-import java.util.List;
 import java.util.concurrent.BlockingQueue;
 
 public interface LlmClient {
 
     /**
-     * 发起一次流式对话请求。
-     *
-     * @param conv        对话历史（含工具调用/结果回合，由适配器映射为各协议格式）
-     * @param tools       本请求携带的工具定义；空列表表示不带工具
-     * @param systemSuffix 非空时拼接到内置系统提示之后（Plan Mode 计划态约束）；空串/null 即普通模式
+     * 发起一次流式对话请求。全部入参由 {@link Request} 承载：
+     * 消息历史、工具集、系统提示（稳定段 + 环境段）、本轮 system-reminder。
+     * 适配器负责按各协议装配缓存通道（Anthropic 显式断点 / OpenAI 前缀顺序）与消息通道。
      */
-    BlockingQueue<StreamEvent> stream(ConversationManager conv, List<ToolDef> tools, String systemSuffix);
+    BlockingQueue<StreamEvent> stream(Request req);
 
-    static LlmClient create(ProviderConfig cfg, String systemPrompt) {
+    static LlmClient create(ProviderConfig cfg) {
         return switch (cfg.getProtocol()) {
-            case "anthropic" -> new AnthropicClient(cfg, systemPrompt);
-            case "openai", "openai-compat" -> new OpenAiClient(cfg, systemPrompt);
+            case "anthropic" -> new AnthropicClient(cfg);
+            case "openai", "openai-compat" -> new OpenAiClient(cfg);
             default -> throw new IllegalArgumentException("不支持的协议: " + cfg.getProtocol());
         };
     }

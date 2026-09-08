@@ -4,3 +4,8 @@ build/
 .idea/
 *.iml
 .DS_Store
+# IDE 产物
+.classpath
+.project
+.settings/
+bin/
