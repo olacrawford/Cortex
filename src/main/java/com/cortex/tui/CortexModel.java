@@ -17,11 +17,11 @@ import com.cortex.tui.tea.KeyPressMessage;
 import com.cortex.tui.tea.Message;
 import com.cortex.tui.tea.Model;
 import com.cortex.tui.tea.MouseMessage;
-import com.cortex.tui.tea.Program;
 import com.cortex.tui.tea.QuitMessage;
 import com.cortex.tui.tea.StreamTickMessage;
 import com.cortex.tui.tea.UpdateResult;
 import com.cortex.tui.tea.WindowSizeMessage;
+
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -46,9 +46,7 @@ public class CortexModel implements Model {
     private final ConversationManager conversation = new ConversationManager();
 
     private AppState state = AppState.CHAT;
-    private Program program;
     private int width = 80;
-    private int height = 24;
 
     // provider 选择
     private int selectIndex;
@@ -87,10 +85,6 @@ public class CortexModel implements Model {
         }
     }
 
-    public void setProgram(Program program) {
-        this.program = program;
-    }
-
     @Override
     public Command init() {
         return Command.checkWindowSize();
@@ -100,7 +94,6 @@ public class CortexModel implements Model {
     public UpdateResult<? extends Model> update(Message msg) {
         if (msg instanceof WindowSizeMessage size) {
             width = size.width();
-            height = size.height();
             if (!doneAtLeastOnce) {
                 doneAtLeastOnce = true;
                 // 多 provider 选择画面已内联渲染 banner，这里只对单 provider 直进 CHAT 打印。
@@ -112,10 +105,10 @@ public class CortexModel implements Model {
             }
             return new UpdateResult<>(this, null);
         }
-        if (msg instanceof QuitMessage q) {
+        if (msg instanceof QuitMessage) {
             return new UpdateResult<>(this, null);
         }
-        if (msg instanceof StreamTickMessage tick) {
+        if (msg instanceof StreamTickMessage) {
             return onStreamTick();
         }
         if (msg instanceof KeyPressMessage key) {

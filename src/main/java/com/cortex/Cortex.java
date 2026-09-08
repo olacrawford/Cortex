@@ -19,7 +19,6 @@ public class Cortex {
             ToolRegistry registry = ToolRegistry.createDefault();
             CortexModel model = new CortexModel(config.getProviders(), registry);
             Program program = new Program(model);
-            model.setProgram(program);
             program.run();
         } catch (ConfigException e) {
             System.err.println("配置错误: " + e.getMessage());

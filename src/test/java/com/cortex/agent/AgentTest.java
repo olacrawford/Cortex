@@ -6,7 +6,6 @@ import com.cortex.llm.LlmClient;
 import com.cortex.llm.Request;
 import com.cortex.llm.StreamEvent;
 import com.cortex.llm.ToolDef;
-import com.cortex.prompt.Reminder;
 import com.cortex.tool.Result;
 import com.cortex.tool.Tool;
 import com.cortex.tool.ToolRegistry;
@@ -158,10 +157,6 @@ class AgentTest {
         }
     }
 
-    private static ToolDef def(String name, boolean ro) {
-        return new ToolDef(name, "测试桩工具", Map.of());
-    }
-
     /** 逐条取事件直到 Done（Agent 保证任何路径都以 Done 收尾），限时兜底。 */
     private static List<AgentEvent> drain(BlockingQueue<AgentEvent> queue) throws InterruptedException {
         List<AgentEvent> events = new ArrayList<>();
@@ -233,6 +228,10 @@ class AgentTest {
         assertInstanceOf(AgentEvent.UsageReport.class, list.get(7));
         assertEquals(20, ((AgentEvent.UsageReport) list.get(7)).usage().inputTokens());
         assertInstanceOf(AgentEvent.Done.class, list.get(8));
+
+        // 桩工具只执行一次，参数原样传入
+        assertEquals(1, stub.executions);
+        assertEquals("{\"path\":\"a.txt\"}", stub.receivedArgs.get(0));
 
         // 历史序列：user → assistant(toolCalls) → tool(results) → assistant(最终)
         var msgs = conv.getMessages();
