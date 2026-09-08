@@ -1,0 +1,28 @@
+# Cortex MCP server 配置示例
+# 放置位置（两层，按 server 名合并，同名时项目级完整覆盖用户级）：
+#   用户级：~/.cortex/mcp.yaml
+#   项目级：<项目根>/.cortex/mcp.yaml
+#
+# env / headers 的值支持 ${VAR} 从宿主环境变量展开（未定义展开为空串）；
+# command / args / server 名 / 工具名不做展开——密钥不落盘，一律走 ${VAR} 引用。
+#
+# 注意：只读类内置工具默认即 Allow；MCP 工具默认按有副作用处理（default 模式下每次确认），
+# 仅当远端自报 annotations.readOnlyHint==true 时按只读放行。
+# 权限规则可用 MCP 命名空间书写，如 allow "mcp__demo__*"。
+
+mcp_servers:
+  github:
+    type: stdio
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-github"]
+    env:
+      GITHUB_TOKEN: "${GITHUB_TOKEN}"
+  filesystem:
+    type: stdio
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp/mcp-sandbox"]
+  example-http:
+    type: http
+    url: "https://mcp.example.com/mcp"
+    headers:
+      Authorization: "Bearer ${EXAMPLE_TOKEN}"
