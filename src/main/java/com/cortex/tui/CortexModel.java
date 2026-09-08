@@ -9,7 +9,8 @@ import com.cortex.agent.ToolEvent;
 import com.cortex.config.ProviderConfig;
 import com.cortex.conversation.ConversationManager;
 import com.cortex.llm.LlmClient;
-import com.cortex.prompt.PromptBuilder;
+import com.cortex.prompt.Prompt;
+import com.cortex.prompt.Reminder;
 import com.cortex.tool.ToolRegistry;
 import com.cortex.tui.tea.Command;
 import com.cortex.tui.tea.KeyPressMessage;
@@ -194,7 +195,7 @@ public class CortexModel implements Model {
 
     private void activate(ProviderConfig provider) {
         this.activeProvider = provider;
-        this.client = LlmClient.create(provider, PromptBuilder.buildSystemPrompt());
+        this.client = LlmClient.create(provider);
     }
 
     // ─── 提交一轮对话 ───
@@ -217,8 +218,8 @@ public class CortexModel implements Model {
         }
         if (text.equals("/do")) {
             mode = Mode.NORMAL;
-            conversation.addUserMessage(PromptBuilder.EXECUTE_DIRECTIVE);
-            String doLine = Styles.USER_PREFIX.apply("❯ ") + PromptBuilder.EXECUTE_DIRECTIVE;
+            conversation.addUserMessage(Reminder.EXECUTE_DIRECTIVE);
+            String doLine = Styles.USER_PREFIX.apply("❯ ") + Reminder.EXECUTE_DIRECTIVE;
             committed.add(doLine);
             return startTurn(doLine);
         }
@@ -239,7 +240,7 @@ public class CortexModel implements Model {
         tickCounter = 0;
         turnCancel = new CancelToken();
         // Agent 虚拟线程内跑 ReAct 循环（请求 → 工具 → 回灌 → 下一轮……直到停止条件）
-        agentQueue = new Agent(client, registry).run(conversation, mode, turnCancel);
+        agentQueue = new Agent(client, registry, Prompt.VERSION).run(conversation, mode, turnCancel);
 
         return new UpdateResult<>(this, Command.batch(
                 Command.println(userLine),
@@ -264,6 +265,15 @@ public class CortexModel implements Model {
                     case AgentEvent.UsageReport u -> {
                         usageIn += u.usage().inputTokens();
                         usageOut += u.usage().outputTokens();
+                        if (Boolean.getBoolean("cortex.debug")) {
+                            // 调试用：把每轮用量（含缓存写/读）以灰字打进 scrollback（F4 验证通道）
+                            String line = Styles.MUTED.apply(String.format(
+                                    "⟐ usage in=%d out=%d cacheW=%d cacheR=%d",
+                                    u.usage().inputTokens(), u.usage().outputTokens(),
+                                    u.usage().cacheWrite(), u.usage().cacheRead()));
+                            committed.add(line);
+                            outputs.add(Command.println(line));
+                        }
                     }
                     case AgentEvent.Iter i -> iter = i.iter();
                     case AgentEvent.Notice n -> {
@@ -488,7 +498,7 @@ public class CortexModel implements Model {
     }
 
     private String bannerBlock() {
-        return Styles.BANNER.apply(PromptBuilder.renderBanner())
+        return Styles.BANNER.apply(Prompt.renderBanner())
                 .concat("\r\n" + Styles.MUTED.apply("工作目录: " + System.getProperty("user.dir")));
     }
 

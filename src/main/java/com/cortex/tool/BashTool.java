@@ -40,7 +40,8 @@ public final class BashTool implements Tool {
 
     @Override
     public String description() {
-        return "在工作目录下执行一条 shell 命令，返回标准输出/标准错误与退出码；受超时约束。";
+        return "在工作目录下执行一条 shell 命令，返回标准输出/标准错误与退出码；受超时约束。"
+                + "读文件、找文件、搜内容请优先用 read_file/glob/grep，不要用 bash 拼凑。";
     }
 
     @Override

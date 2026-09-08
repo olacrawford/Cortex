@@ -3,11 +3,15 @@ package com.cortex.agent;
 import com.cortex.conversation.ConversationManager;
 import com.cortex.conversation.Message;
 import com.cortex.llm.LlmClient;
+import com.cortex.llm.Request;
 import com.cortex.llm.StreamEvent;
+import com.cortex.llm.SystemPrompt;
 import com.cortex.llm.ToolCall;
 import com.cortex.llm.ToolDef;
 import com.cortex.llm.ToolResult;
-import com.cortex.prompt.PromptBuilder;
+import com.cortex.prompt.Environment;
+import com.cortex.prompt.Prompt;
+import com.cortex.prompt.Reminder;
 import com.cortex.tool.Result;
 import com.cortex.tool.ToolRegistry;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -36,6 +40,8 @@ public final class Agent {
     static final int MAX_ITERATIONS = 25;
     /** 连续「整轮只产生未知工具调用」的迭代数上限（F2）。 */
     static final int MAX_UNKNOWN_RUN = 3;
+    /** 规划模式完整提醒的注入间隔：首轮与每隔此轮数注入完整版，其余轮精简（F7）。 */
+    static final int PLAN_REMINDER_INTERVAL = 4;
 
     // 停止/收尾提示文案——既推给 UI（Event.Notice / 兜底文本），也写入历史收尾。
     static final String NOTICE_MAX_ITER = "（已达最大迭代轮数 25，自动停止；可继续发消息推进。）";
@@ -45,10 +51,12 @@ public final class Agent {
 
     private final LlmClient client;
     private final ToolRegistry registry;
+    private final String version;
 
-    public Agent(LlmClient client, ToolRegistry registry) {
+    public Agent(LlmClient client, ToolRegistry registry, String version) {
         this.client = client;
         this.registry = registry;
+        this.version = version == null ? "" : version;
     }
 
     /**
@@ -75,8 +83,10 @@ public final class Agent {
 
     private void loop(ConversationManager conv, Mode mode, CancelToken cancel, BlockingQueue<AgentEvent> out)
             throws InterruptedException {
+        // 环境信息（不缓存）与稳定系统提示（可缓存）在 run 起始构造一次，跨轮复用（F2/F3/N1）
+        String envText = Environment.gather(this.version, "").render();
+        String sys = Prompt.buildSystemPrompt();
         List<ToolDef> defs = mode == Mode.PLAN ? registry.readOnlyDefinitions() : registry.definitions();
-        String suffix = mode == Mode.PLAN ? PromptBuilder.PLAN_MODE_REMINDER : "";
 
         int unknownRun = 0;
         for (int iter = 1; iter <= MAX_ITERATIONS; iter++) {
@@ -85,16 +95,24 @@ public final class Agent {
                 return;
             }
 
+            // 规划模式提醒按轮次注入：首轮与间隔轮完整，其余精简（F7）；普通模式不注入
+            String reminder = "";
+            if (mode == Mode.PLAN) {
+                boolean full = iter == 1 || (iter - 1) % PLAN_REMINDER_INTERVAL == 0;
+                reminder = Reminder.plan(full);
+            }
+
             // 请求：流式收集本轮响应（双路——文本实时转发 + 完整调用收集）
-            StreamOutcome once = streamOnce(conv, defs, suffix, cancel, out);
+            StreamOutcome once = streamOnce(conv, sys, envText, defs, reminder, cancel, out);
             if (once.failed()) {
                 // 取消优先于流错误
                 ensureAssistantTail(conv, cancel.isCancelled() ? NOTICE_CANCELLED : NOTICE_STREAM_ERR);
                 return;
             }
             if (once.usage() != null) {
-                emit(out, cancel, new AgentEvent.UsageReport(
-                        new Usage(once.usage().inputTokens(), once.usage().outputTokens())));
+                emit(out, cancel, new AgentEvent.UsageReport(new Usage(
+                        once.usage().inputTokens(), once.usage().outputTokens(),
+                        once.usage().cacheWrite(), once.usage().cacheRead())));
             }
 
             // 自然完成：无工具调用的纯文本即最终答复（F2-1）
@@ -129,14 +147,16 @@ public final class Agent {
 
     private record StreamOutcome(String text, List<ToolCall> calls, com.cortex.llm.Usage usage, boolean failed) {}
 
-    /** 一次流式请求：转发文本增量、收集完整工具调用、记录用量，直到流结束。 */
-    private StreamOutcome streamOnce(ConversationManager conv, List<ToolDef> defs, String suffix,
+    /** 一次流式请求：组装 Request（系统两段 + 本轮 reminder）、转发文本、收集完整调用与用量，直到流结束。 */
+    private StreamOutcome streamOnce(ConversationManager conv, String sys, String envText,
+                                     List<ToolDef> defs, String reminder,
                                      CancelToken cancel, BlockingQueue<AgentEvent> out)
             throws InterruptedException {
         StringBuilder text = new StringBuilder();
         List<ToolCall> calls = new ArrayList<>();
         com.cortex.llm.Usage usage = null;
-        BlockingQueue<StreamEvent> queue = client.stream(conv, defs, suffix);
+        Request req = new Request(conv.getMessages(), defs, new SystemPrompt(sys, envText), reminder);
+        BlockingQueue<StreamEvent> queue = client.stream(req);
         while (true) {
             if (cancel.isCancelled()) {
                 // 用户取消：立即停止消费当前流（底层请求尽力而为），由 loop 按取消路径收尾

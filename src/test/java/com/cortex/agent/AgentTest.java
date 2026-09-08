@@ -3,9 +3,10 @@ package com.cortex.agent;
 import com.cortex.conversation.ConversationManager;
 import com.cortex.conversation.Message;
 import com.cortex.llm.LlmClient;
+import com.cortex.llm.Request;
 import com.cortex.llm.StreamEvent;
 import com.cortex.llm.ToolDef;
-import com.cortex.prompt.PromptBuilder;
+import com.cortex.prompt.Reminder;
 import com.cortex.tool.Result;
 import com.cortex.tool.Tool;
 import com.cortex.tool.ToolRegistry;
@@ -26,13 +27,12 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class AgentTest {
 
-    /** 脚本化假客户端：每次 stream() 逐次回放脚本；脚本耗尽后回放 defaultResponse。 */
+    /** 脚本化假客户端：每次 stream() 逐次回放脚本；脚本耗尽后回放 defaultResponse；记录收到的 Request。 */
     private static final class FakeClient implements LlmClient {
         private final List<List<StreamEvent>> script = new ArrayList<>();
         private List<StreamEvent> defaultResponse = List.of(new StreamEvent.StreamEnd("stop", 0, 0));
         private int index = 0;
-        final List<List<ToolDef>> receivedTools = new ArrayList<>();
-        final List<String> receivedSuffix = new ArrayList<>();
+        final List<Request> reqs = new ArrayList<>();
 
         void enqueue(List<StreamEvent> events) {
             script.add(events);
@@ -47,9 +47,8 @@ class AgentTest {
         }
 
         @Override
-        public BlockingQueue<StreamEvent> stream(ConversationManager conv, List<ToolDef> tools, String systemSuffix) {
-            receivedTools.add(tools);
-            receivedSuffix.add(systemSuffix);
+        public BlockingQueue<StreamEvent> stream(Request req) {
+            reqs.add(req);
             List<StreamEvent> events = index < script.size() ? script.get(index) : defaultResponse;
             index++;
             return new LinkedBlockingQueue<>(events);
@@ -187,6 +186,10 @@ class AgentTest {
         return drain(agent.run(conv, Mode.NORMAL, cancel));
     }
 
+    private static Agent agent(FakeClient client, ToolRegistry registry) {
+        return new Agent(client, registry, "test");
+    }
+
     // ─── 场景 A：多轮链路（AC1/AC2/AC6/AC7/F6）───
 
     @Test
@@ -199,16 +202,16 @@ class AgentTest {
         client.enqueue(List.of(
                 new StreamEvent.TextDelta("我先读一下文件。"),
                 new StreamEvent.ToolCallComplete("call-1", "read_file", "{\"path\":\"a.txt\"}"),
-                new StreamEvent.UsageEvent(new com.cortex.llm.Usage(10, 5)),
+                new StreamEvent.UsageEvent(new com.cortex.llm.Usage(10, 5, 3, 7)),
                 new StreamEvent.StreamEnd("tool_use", 10, 5)));
         client.enqueue(List.of(
                 new StreamEvent.TextDelta("文件里写的是 hello。"),
-                new StreamEvent.UsageEvent(new com.cortex.llm.Usage(20, 8)),
+                new StreamEvent.UsageEvent(new com.cortex.llm.Usage(20, 8, 0, 15)),
                 new StreamEvent.StreamEnd("stop", 20, 8)));
 
         ConversationManager conv = new ConversationManager();
         conv.addUserMessage("读 a.txt 并总结");
-        List<AgentEvent> list = runAndDrain(new Agent(client, registry), conv, new CancelToken());
+        List<AgentEvent> list = runAndDrain(agent(client, registry), conv, new CancelToken());
 
         // 事件序列：Iter(1) → Text(preamble) → UsageReport → Tool START/END → Iter(2) → Text(最终) → UsageReport → Done
         assertInstanceOf(AgentEvent.Iter.class, list.get(0));
@@ -216,6 +219,9 @@ class AgentTest {
         assertEquals("我先读一下文件。", ((AgentEvent.Text) list.get(1)).delta());
         assertInstanceOf(AgentEvent.UsageReport.class, list.get(2));
         assertEquals(10, ((AgentEvent.UsageReport) list.get(2)).usage().inputTokens());
+        // 缓存用量透传（F4）
+        assertEquals(3, ((AgentEvent.UsageReport) list.get(2)).usage().cacheWrite());
+        assertEquals(7, ((AgentEvent.UsageReport) list.get(2)).usage().cacheRead());
         assertInstanceOf(AgentEvent.Tool.class, list.get(3));
         assertEquals(Phase.START, ((AgentEvent.Tool) list.get(3)).event().phase());
         assertInstanceOf(AgentEvent.Tool.class, list.get(4));
@@ -257,7 +263,7 @@ class AgentTest {
 
         ConversationManager conv = new ConversationManager();
         conv.addUserMessage("循环调工具");
-        List<AgentEvent> list = runAndDrain(new Agent(client, registry), conv, new CancelToken());
+        List<AgentEvent> list = runAndDrain(agent(client, registry), conv, new CancelToken());
 
         assertEquals(Agent.MAX_ITERATIONS, client.streamCalls());
         assertTrue(list.stream().anyMatch(e -> e instanceof AgentEvent.Notice n
@@ -281,7 +287,7 @@ class AgentTest {
 
         ConversationManager conv = new ConversationManager();
         conv.addUserMessage("调用不存在的工具");
-        List<AgentEvent> list = runAndDrain(new Agent(client, registry), conv, new CancelToken());
+        List<AgentEvent> list = runAndDrain(agent(client, registry), conv, new CancelToken());
 
         assertEquals(Agent.MAX_UNKNOWN_RUN, client.streamCalls());
         assertTrue(list.stream().anyMatch(e -> e instanceof AgentEvent.Notice n
@@ -311,7 +317,7 @@ class AgentTest {
 
         ConversationManager conv = new ConversationManager();
         conv.addUserMessage("混合调用");
-        runAndDrain(new Agent(client, registry), conv, new CancelToken());
+        runAndDrain(agent(client, registry), conv, new CancelToken());
 
         // 若计数未重置，第 3 轮就会停；实际跑满 4 轮并以最终文本收尾
         assertEquals(4, client.streamCalls());
@@ -345,7 +351,7 @@ class AgentTest {
 
         ConversationManager conv = new ConversationManager();
         conv.addUserMessage("批量执行");
-        runAndDrain(new Agent(client, registry), conv, new CancelToken());
+        runAndDrain(agent(client, registry), conv, new CancelToken());
 
         // 两只读确实并发（峰值 ≥2），有副作用工具在其后开始
         assertTrue(peak.get() >= 2, "两只读应并发执行，峰值=" + peak.get());
@@ -382,7 +388,7 @@ class AgentTest {
         ConversationManager conv = new ConversationManager();
         conv.addUserMessage("会卡住的任务");
         CancelToken cancel = new CancelToken();
-        BlockingQueue<AgentEvent> queue = new Agent(client, registry).run(conv, Mode.NORMAL, cancel);
+        BlockingQueue<AgentEvent> queue = agent(client, registry).run(conv, Mode.NORMAL, cancel);
 
         // 看到工具 START 后，等工具进入执行再取消
         long deadline = System.currentTimeMillis() + 5000;
@@ -412,32 +418,82 @@ class AgentTest {
         client.enqueue(List.of(
                 new StreamEvent.TextDelta("继续没问题。"),
                 new StreamEvent.StreamEnd("stop", 0, 0)));
-        List<AgentEvent> second = runAndDrain(new Agent(client, registry), conv, new CancelToken());
+        List<AgentEvent> second = runAndDrain(agent(client, registry), conv, new CancelToken());
         assertTrue(second.stream().anyMatch(e -> e instanceof AgentEvent.Text t
                 && t.delta().equals("继续没问题。")), "events=" + second + " streamCalls=" + client.streamCalls());
         assertEquals("继续没问题。", conv.getMessages().get(conv.size() - 1).getContent());
     }
 
-    // ─── 场景 F：Plan Mode 只放开只读工具 + 系统后缀（AC13）───
+    // ─── 场景 F：Plan Mode 工具集 / 按轮次 reminder / 系统一致性（AC9/F6/F7）───
 
     @Test
-    void 计划模式_只注入只读工具与计划态后缀() throws Exception {
+    void 计划模式_只读工具_按轮次注入reminder_不写历史() throws Exception {
         ToolRegistry registry = ToolRegistry.createDefault();
         FakeClient client = new FakeClient();
-        client.enqueue(List.of(
+        client.enqueue(List.of( // 第 1 轮：请求只读工具
+                new StreamEvent.TextDelta("先看一下现状。"),
+                new StreamEvent.ToolCallComplete("c1", "read_file", "{\"path\":\"a.txt\"}"),
+                new StreamEvent.StreamEnd("tool_use", 0, 0)));
+        client.enqueue(List.of( // 第 2 轮：给出计划文本，自然完成
                 new StreamEvent.TextDelta("计划如下。"),
                 new StreamEvent.StreamEnd("stop", 0, 0)));
 
         ConversationManager conv = new ConversationManager();
         conv.addUserMessage("出一个方案");
-        List<AgentEvent> list = drain(new Agent(client, registry).run(conv, Mode.PLAN, new CancelToken()));
+        List<AgentEvent> list = drain(agent(client, registry).run(conv, Mode.PLAN, new CancelToken()));
 
         assertInstanceOf(AgentEvent.Done.class, list.get(list.size() - 1));
-        List<ToolDef> tools = client.receivedTools.get(0);
+        assertEquals(2, client.reqs.size());
+
+        // 工具集：规划模式仅只读（AC9）
+        List<ToolDef> tools = client.reqs.get(0).tools();
         assertTrue(tools.stream().allMatch(d -> List.of("read_file", "glob", "grep").contains(d.name())),
                 "计划模式只应注入只读工具: " + tools);
         assertEquals(3, tools.size());
-        assertEquals(PromptBuilder.PLAN_MODE_REMINDER, client.receivedSuffix.get(0));
+
+        // 系统提示两段：stable 非空、environment 非空（F2/F3）
+        assertTrue(client.reqs.get(0).system().stable().contains("terminal coding agent"));
+        assertTrue(client.reqs.get(0).system().environment().contains("## 环境信息"));
+
+        // reminder 节奏：第 1 轮完整、第 2 轮精简（F7）
+        String reminder1 = client.reqs.get(0).reminder();
+        String reminder2 = client.reqs.get(1).reminder();
+        assertTrue(reminder1.contains("<system-reminder>"));
+        assertTrue(reminder1.contains("You are currently in PLAN MODE"));
+        assertTrue(reminder2.contains("<system-reminder>"));
+        assertTrue(reminder2.contains("Plan mode is still active"));
+        assertFalse(reminder2.contains("You are currently in PLAN MODE"));
+
+        // reminder 不写入持久历史（F6/N3）
+        assertTrue(conv.getMessages().stream().noneMatch(m -> m.getContent().contains("<system-reminder>")));
+        assertFalse(client.reqs.get(1).messages().get(client.reqs.get(1).messages().size() - 1)
+                .getContent().contains("<system-reminder>"));
+    }
+
+    @Test
+    void 普通模式_全量工具_无reminder_系统与规划模式一致() throws Exception {
+        ToolRegistry registry = ToolRegistry.createDefault();
+        FakeClient client = new FakeClient();
+        client.enqueue(List.of(
+                new StreamEvent.TextDelta("你好。"),
+                new StreamEvent.StreamEnd("stop", 0, 0)));
+
+        ConversationManager conv = new ConversationManager();
+        conv.addUserMessage("hi");
+        drain(agent(client, registry).run(conv, Mode.NORMAL, new CancelToken()));
+
+        // 普通模式：全量工具、无 reminder（F7）
+        assertEquals(6, client.reqs.get(0).tools().size());
+        assertEquals("", client.reqs.get(0).reminder());
+        // 稳定系统提示跨模式一致（N1）：与规划模式跑同注册中心所得 stable 逐字节相等
+        FakeClient planClient = new FakeClient();
+        planClient.enqueue(List.of(
+                new StreamEvent.TextDelta("计划。"),
+                new StreamEvent.StreamEnd("stop", 0, 0)));
+        ConversationManager planConv = new ConversationManager();
+        planConv.addUserMessage("方案");
+        drain(agent(planClient, registry).run(planConv, Mode.PLAN, new CancelToken()));
+        assertEquals(client.reqs.get(0).system().stable(), planClient.reqs.get(0).system().stable());
     }
 
     // ─── 场景 G：流出错恢复（AC5）───
@@ -456,14 +512,14 @@ class AgentTest {
 
         ConversationManager conv = new ConversationManager();
         conv.addUserMessage("hi");
-        List<AgentEvent> list = runAndDrain(new Agent(client, registry), conv, new CancelToken());
+        List<AgentEvent> list = runAndDrain(agent(client, registry), conv, new CancelToken());
 
         assertTrue(list.stream().anyMatch(e -> e instanceof AgentEvent.Failed f
                 && f.message().equals("连接超时")));
         assertEquals(Agent.NOTICE_STREAM_ERR, conv.getMessages().get(conv.size() - 1).getContent());
         // 恢复后可继续
         client.streamCalls();
-        runAndDrain(new Agent(client, registry), conv, new CancelToken());
+        runAndDrain(agent(client, registry), conv, new CancelToken());
         assertEquals("恢复后正常。", conv.getMessages().get(conv.size() - 1).getContent());
     }
 

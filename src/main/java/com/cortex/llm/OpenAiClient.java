@@ -1,7 +1,6 @@
 package com.cortex.llm;
 
 import com.cortex.config.ProviderConfig;
-import com.cortex.conversation.ConversationManager;
 import com.cortex.conversation.Message;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.openai.client.okhttp.OpenAIOkHttpClient;
@@ -14,8 +13,8 @@ import com.openai.models.chat.completions.ChatCompletionFunctionTool;
 import com.openai.models.chat.completions.ChatCompletionMessageFunctionToolCall;
 import com.openai.models.chat.completions.ChatCompletionMessageParam;
 import com.openai.models.chat.completions.ChatCompletionMessageToolCall;
-import com.openai.models.chat.completions.ChatCompletionSystemMessageParam;
 import com.openai.models.chat.completions.ChatCompletionStreamOptions;
+import com.openai.models.chat.completions.ChatCompletionSystemMessageParam;
 import com.openai.models.chat.completions.ChatCompletionTool;
 import com.openai.models.chat.completions.ChatCompletionToolMessageParam;
 import com.openai.models.chat.completions.ChatCompletionUserMessageParam;
@@ -28,19 +27,20 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 
 /**
- * OpenAI 协议适配器（含 openai-compat）：注入工具定义、解析流式工具调用分片、
- * 把工具调用/结果回合映射为 assistant.tool_calls / tool 角色消息。
+ * OpenAI 协议适配器（含 openai-compat）。
+ * 缓存通道（F3）：单条 system 消息 = stable 在前 + environment 在后——stable 居请求前缀，
+ * 端点前缀缓存自动命中稳定部分（尽力而为，不强制端点支持）。
+ * reminder 织入（F6）：追加一条尾部 user 消息（OpenAI 容忍连续 user）。
+ * 缓存用量（F4/N6）：cacheRead 取 promptTokensDetails.cachedTokens（缺字段为 0），cacheWrite 恒 0。
  */
 public class OpenAiClient implements LlmClient {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final ProviderConfig config;
-    private final String systemPrompt;
 
-    public OpenAiClient(ProviderConfig config, String systemPrompt) {
+    public OpenAiClient(ProviderConfig config) {
         this.config = config;
-        this.systemPrompt = systemPrompt;
     }
 
     /** 流式拼接中的工具调用片段：按 index 聚合 id / 函数名 / 参数碎片。 */
@@ -51,7 +51,7 @@ public class OpenAiClient implements LlmClient {
     }
 
     @Override
-    public BlockingQueue<StreamEvent> stream(ConversationManager conv, List<ToolDef> tools, String systemSuffix) {
+    public BlockingQueue<StreamEvent> stream(Request req) {
         BlockingQueue<StreamEvent> queue = new LinkedBlockingQueue<>();
         Thread.ofVirtual().name("openai-stream").start(() -> {
             try {
@@ -63,17 +63,23 @@ public class OpenAiClient implements LlmClient {
                 List<ChatCompletionMessageParam> messages = new ArrayList<>();
                 messages.add(ChatCompletionMessageParam.ofSystem(
                         ChatCompletionSystemMessageParam.builder()
-                                .content(effectiveSystem(systemSuffix))
+                                .content(effectiveSystem(req.system()))
                                 .build()));
-                messages.addAll(toOpenAIMessages(conv));
+                messages.addAll(toOpenAIMessages(req.messages()));
+                if (req.reminder() != null && !req.reminder().isEmpty()) {
+                    messages.add(ChatCompletionMessageParam.ofUser(
+                            ChatCompletionUserMessageParam.builder()
+                                    .content(req.reminder())
+                                    .build()));
+                }
 
                 var paramsBuilder = ChatCompletionCreateParams.builder()
                         .model(config.getModel())
                         .messages(messages)
                         // 不开 includeUsage 流式 usage 为空（F8）
                         .streamOptions(ChatCompletionStreamOptions.builder().includeUsage(true).build());
-                if (tools != null && !tools.isEmpty()) {
-                    paramsBuilder.tools(toOpenAITools(tools));
+                if (!req.tools().isEmpty()) {
+                    paramsBuilder.tools(toOpenAITools(req.tools()));
                 }
                 var params = paramsBuilder.build();
 
@@ -81,6 +87,7 @@ public class OpenAiClient implements LlmClient {
 
                 int inputTokens = 0;
                 int outputTokens = 0;
+                long cachedTokens = 0;
                 Map<Long, Frag> frags = new LinkedHashMap<>();
 
                 try (var stream = streamResponse.stream()) {
@@ -115,16 +122,18 @@ public class OpenAiClient implements LlmClient {
                             var usage = chunk.usage().get();
                             inputTokens = (int) usage.promptTokens();
                             outputTokens = (int) usage.completionTokens();
+                            cachedTokens = usage.promptTokensDetails()
+                                    .flatMap(d -> d.cachedTokens())
+                                    .orElse(0L);
                         }
                     }
                 }
 
-                // 工具调用在 StreamEnd 之前上抛，保证消费方先拿到完整调用
                 for (Frag frag : frags.values()) {
                     String args = frag.args.isEmpty() ? "{}" : frag.args.toString();
                     queue.put(new StreamEvent.ToolCallComplete(frag.id, frag.name, args));
                 }
-                queue.put(new StreamEvent.UsageEvent(new Usage(inputTokens, outputTokens)));
+                queue.put(new StreamEvent.UsageEvent(new Usage(inputTokens, outputTokens, 0, cachedTokens)));
                 queue.put(new StreamEvent.StreamEnd("stop", inputTokens, outputTokens));
             } catch (Exception e) {
                 try {
@@ -137,12 +146,14 @@ public class OpenAiClient implements LlmClient {
 
     // ─── 请求组装 ───
 
-    /** 内置系统提示 + 计划态后缀（后缀非空时拼为同一段文本）。 */
-    private String effectiveSystem(String systemSuffix) {
-        if (systemSuffix == null || systemSuffix.isEmpty()) {
-            return systemPrompt;
+    /** 单条 system：stable 在前（居缓存前缀），environment 非空时拼在后面。 */
+    private String effectiveSystem(SystemPrompt system) {
+        String stable = system.stable() == null ? "" : system.stable();
+        String env = system.environment() == null ? "" : system.environment();
+        if (env.isEmpty()) {
+            return stable;
         }
-        return systemPrompt + "\n\n" + systemSuffix;
+        return stable.isEmpty() ? env : stable + "\n\n" + env;
     }
 
     private List<ChatCompletionTool> toOpenAITools(List<ToolDef> defs) {
@@ -165,9 +176,9 @@ public class OpenAiClient implements LlmClient {
         return result;
     }
 
-    private List<ChatCompletionMessageParam> toOpenAIMessages(ConversationManager conv) {
+    private List<ChatCompletionMessageParam> toOpenAIMessages(List<Message> convMessages) {
         List<ChatCompletionMessageParam> messages = new ArrayList<>();
-        for (var msg : conv.getMessages()) {
+        for (var msg : convMessages) {
             switch (msg.getRole()) {
                 case USER -> messages.add(ChatCompletionMessageParam.ofUser(
                         ChatCompletionUserMessageParam.builder()
@@ -176,7 +187,6 @@ public class OpenAiClient implements LlmClient {
                 case ASSISTANT -> messages.add(ChatCompletionMessageParam.ofAssistant(
                         toOpenAIAssistant(msg)));
                 case TOOL -> {
-                    // OpenAI 协议：每个 tool_call_id 一条 tool 角色消息
                     for (ToolResult r : msg.getToolResults()) {
                         messages.add(ChatCompletionMessageParam.ofTool(
                                 ChatCompletionToolMessageParam.builder()

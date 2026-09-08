@@ -32,7 +32,7 @@ public final class EditFileTool implements Tool {
     @Override
     public String description() {
         return "把文件中唯一出现的 old_string 替换为 new_string；old_string 必须在文件中恰好出现一次，"
-                + "匹配多次时请提供更长上下文。";
+                + "匹配多次时请提供更长上下文。编辑前请先用 read_file 读取目标文件，确认 old_string 唯一。";
     }
 
     @Override
