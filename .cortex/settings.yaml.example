@@ -1,0 +1,22 @@
+# Cortex 权限配置示例
+# 三层配置文件（越靠近项目优先级越高，就近命中即止；同层 deny 优先于 allow）：
+#   用户级：~/.cortex/settings.yaml          —— 个人全局默认
+#   项目级：<项目根>/.cortex/settings.yaml    —— 可提交进 git，团队共享
+#   本地层：<项目根>/.cortex/settings.local.yaml —— 个人临时放行（人在回路"永久允许"写入于此），已 gitignore
+#
+# 规则格式：「工具名(模式)」，工具名用友好名 Bash/Read/Write/Edit/Glob/Grep；
+# 模式段支持精确匹配与 glob（* 任意字符；** 跨目录段，仅对文件路径有意义）；
+# 不带模式段（如 Read）匹配该工具的全部调用。
+# 注意：只读类工具默认即 Allow，allow 规则主要用于提前放行 Bash/Write；
+#       deny 规则可对只读做围栏（如 Read(.env)）。
+# 黑名单（危险命令硬拦截）不可配置，任何模式/规则都拦得住。
+
+defaultMode: default
+permissions:
+  allow:
+    - "Bash(git *)"
+    - "Bash(./gradlew test)"
+  deny:
+    - "Bash(rm *)"
+    - "Read(.env)"
+    - "Write(.env)"

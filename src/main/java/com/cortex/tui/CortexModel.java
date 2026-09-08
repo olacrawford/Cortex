@@ -2,13 +2,16 @@ package com.cortex.tui;
 
 import com.cortex.agent.Agent;
 import com.cortex.agent.AgentEvent;
+import com.cortex.agent.ApprovalRequest;
 import com.cortex.agent.CancelToken;
-import com.cortex.agent.Mode;
 import com.cortex.agent.Phase;
 import com.cortex.agent.ToolEvent;
 import com.cortex.config.ProviderConfig;
 import com.cortex.conversation.ConversationManager;
 import com.cortex.llm.LlmClient;
+import com.cortex.permission.Mode;
+import com.cortex.permission.Outcome;
+import com.cortex.permission.PermissionEngine;
 import com.cortex.prompt.Prompt;
 import com.cortex.prompt.Reminder;
 import com.cortex.tool.ToolRegistry;
@@ -17,11 +20,11 @@ import com.cortex.tui.tea.KeyPressMessage;
 import com.cortex.tui.tea.Message;
 import com.cortex.tui.tea.Model;
 import com.cortex.tui.tea.MouseMessage;
-import com.cortex.tui.tea.Program;
 import com.cortex.tui.tea.QuitMessage;
 import com.cortex.tui.tea.StreamTickMessage;
 import com.cortex.tui.tea.UpdateResult;
 import com.cortex.tui.tea.WindowSizeMessage;
+
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -43,12 +46,11 @@ public class CortexModel implements Model {
 
     private final List<ProviderConfig> providers;
     private final ToolRegistry registry;
+    private final PermissionEngine engine;
     private final ConversationManager conversation = new ConversationManager();
 
     private AppState state = AppState.CHAT;
-    private Program program;
     private int width = 80;
-    private int height = 24;
 
     // provider 选择
     private int selectIndex;
@@ -67,8 +69,12 @@ public class CortexModel implements Model {
     private long tickCounter;
     private boolean doneAtLeastOnce;
 
-    // Agent Loop 状态
-    private Mode mode = Mode.NORMAL;
+    // 人在回路（待批准）状态
+    private ApprovalRequest pending;
+    private int approveCursor;
+
+    // 权限模式（跨轮保持；初始值取自三层配置）
+    private Mode mode;
     private int iter;
     private long usageIn;
     private long usageOut;
@@ -76,19 +82,17 @@ public class CortexModel implements Model {
     /** 已提交（渲染定型并写入 scrollback）的消息列表，用于退出时 dumpHistory。 */
     private final List<String> committed = new ArrayList<>();
 
-    public CortexModel(List<ProviderConfig> providers, ToolRegistry registry) {
+    public CortexModel(List<ProviderConfig> providers, ToolRegistry registry, PermissionEngine engine) {
         this.providers = providers;
         this.registry = registry;
+        this.engine = engine;
+        this.mode = engine.startMode();
         if (providers.size() == 1) {
             this.state = AppState.CHAT;
             activate(providers.get(0));
         } else {
             this.state = AppState.PROVIDER_SELECT;
         }
-    }
-
-    public void setProgram(Program program) {
-        this.program = program;
     }
 
     @Override
@@ -100,7 +104,6 @@ public class CortexModel implements Model {
     public UpdateResult<? extends Model> update(Message msg) {
         if (msg instanceof WindowSizeMessage size) {
             width = size.width();
-            height = size.height();
             if (!doneAtLeastOnce) {
                 doneAtLeastOnce = true;
                 // 多 provider 选择画面已内联渲染 banner，这里只对单 provider 直进 CHAT 打印。
@@ -112,10 +115,10 @@ public class CortexModel implements Model {
             }
             return new UpdateResult<>(this, null);
         }
-        if (msg instanceof QuitMessage q) {
+        if (msg instanceof QuitMessage) {
             return new UpdateResult<>(this, null);
         }
-        if (msg instanceof StreamTickMessage tick) {
+        if (msg instanceof StreamTickMessage) {
             return onStreamTick();
         }
         if (msg instanceof KeyPressMessage key) {
@@ -127,9 +130,84 @@ public class CortexModel implements Model {
         return new UpdateResult<>(this, null);
     }
 
+    // ─── 人在回路：待批准三选一（F8）───
+
+    /** 待批准态按键：↑↓/j/k 移光标，回车确认，数字键 1/2/3 直选，y/n 便捷键，Esc/Ctrl+C 取消。 */
+    private UpdateResult<? extends Model> onApprovalKey(KeyPressMessage key) {
+        switch (key.key()) {
+            case "up", "left" -> {
+                approveCursor = (approveCursor + 2) % 3;
+                return new UpdateResult<>(this, null);
+            }
+            case "down", "right" -> {
+                approveCursor = (approveCursor + 1) % 3;
+                return new UpdateResult<>(this, null);
+            }
+            case "enter" -> {
+                return commitApproval(outcomeForIndex(approveCursor));
+            }
+            case "esc", "ctrl+c" -> {
+                // 取消：先解阻塞（兜底 DENY_ONCE），再取消本轮（N4）
+                return cancelApproval();
+            }
+            default -> {
+                return switch (key.key()) {
+                    case "1" -> commitApproval(Outcome.ALLOW_ONCE);
+                    case "2" -> commitApproval(Outcome.ALLOW_FOREVER);
+                    case "3" -> commitApproval(Outcome.DENY_ONCE);
+                    case "y" -> commitApproval(Outcome.ALLOW_ONCE);
+                    case "n", "d" -> commitApproval(Outcome.DENY_ONCE);
+                    default -> new UpdateResult<>(this, null);
+                };
+            }
+        }
+    }
+
+    private UpdateResult<? extends Model> commitApproval(Outcome outcome) {
+        if (pending != null) {
+            pending.respond().offer(outcome);
+        }
+        pending = null;
+        return new UpdateResult<>(this, null);
+    }
+
+    /** approving 态取消：兜底 DENY_ONCE 解 agent 阻塞，再取消本轮（不退出程序，N4）。 */
+    private UpdateResult<? extends Model> cancelApproval() {
+        if (pending != null) {
+            pending.respond().offer(Outcome.DENY_ONCE);
+        }
+        pending = null;
+        if (turnCancel != null) {
+            turnCancel.cancel();
+        }
+        return new UpdateResult<>(this, null);
+    }
+
+    private static Outcome outcomeForIndex(int index) {
+        return switch (index) {
+            case 1 -> Outcome.ALLOW_FOREVER;
+            case 2 -> Outcome.DENY_ONCE;
+            default -> Outcome.ALLOW_ONCE;
+        };
+    }
+
     // ─── provider 选择 ───
     private UpdateResult<? extends Model> onKey(KeyPressMessage key) {
+        // 人在回路（待批准）态：按键全部由三选一菜单消费（F8）
+        if (pending != null) {
+            return onApprovalKey(key);
+        }
         switch (key.key()) {
+            case "shift+tab" -> {
+                // 仅空闲态生效：循环切换权限模式（F7），跨轮保持
+                if (state == AppState.CHAT && !streaming) {
+                    mode = Mode.values()[(mode.ordinal() + 1) % Mode.values().length];
+                    String notice = Styles.MUTED.apply("⊕ 权限模式已切换为 " + mode.displayName());
+                    committed.add(notice);
+                    return new UpdateResult<>(this, Command.println(notice));
+                }
+                return new UpdateResult<>(this, null);
+            }
             case "ctrl+c" -> {
                 // 流式态：取消本轮、回空闲态、不退出（F7）；其余状态退出程序
                 if (streaming) {
@@ -217,7 +295,7 @@ public class CortexModel implements Model {
             return new UpdateResult<>(this, Command.println(hint));
         }
         if (text.equals("/do")) {
-            mode = Mode.NORMAL;
+            mode = Mode.DEFAULT;
             conversation.addUserMessage(Reminder.EXECUTE_DIRECTIVE);
             String doLine = Styles.USER_PREFIX.apply("❯ ") + Reminder.EXECUTE_DIRECTIVE;
             committed.add(doLine);
@@ -239,8 +317,8 @@ public class CortexModel implements Model {
         requestStartMs = System.currentTimeMillis();
         tickCounter = 0;
         turnCancel = new CancelToken();
-        // Agent 虚拟线程内跑 ReAct 循环（请求 → 工具 → 回灌 → 下一轮……直到停止条件）
-        agentQueue = new Agent(client, registry, Prompt.VERSION).run(conversation, mode, turnCancel);
+        // Agent 虚拟线程内跑 ReAct 循环（请求 → 权限判定 → 工具 → 回灌 → 下一轮……直到停止条件）
+        agentQueue = new Agent(client, registry, Prompt.VERSION, engine).run(conversation, mode, turnCancel);
 
         return new UpdateResult<>(this, Command.batch(
                 Command.println(userLine),
@@ -281,6 +359,7 @@ public class CortexModel implements Model {
                         committed.add(line);
                         outputs.add(Command.println(line));
                     }
+                    case AgentEvent.Approval approval -> pending = approval.request();
                     case AgentEvent.Done done -> {
                         outputs.addAll(finishTurn());
                         turnOver = true;
@@ -431,7 +510,10 @@ public class CortexModel implements Model {
     }
 
     private void renderChat(StringBuilder sb) {
-        if (streaming) {
+        if (pending != null) {
+            sb.append(approvalBlock(pending, approveCursor));
+            sb.append("\r\n");
+        } else if (streaming) {
             long elapsed = System.currentTimeMillis() - requestStartMs;
             int seconds = (int) (elapsed / 1000);
             char frame = SpinnerVerbs.frameAt(tickCounter);
@@ -470,20 +552,45 @@ public class CortexModel implements Model {
     }
 
     private String statusBar() {
-        String providerName = activeProvider != null ? activeProvider.getName() : "";
-        if (mode == Mode.PLAN) {
-            providerName += " [PLAN]";
-        }
+        // 左侧常驻显示当前权限模式（取代 provider 名，F7/AC9）
+        String left = switch (mode) {
+            case DEFAULT -> Styles.SELECT_IDLE.apply("DEFAULT");
+            case ACCEPT_EDITS -> Styles.SELECT_ACTIVE.apply("ACCEPT EDITS");
+            case PLAN -> Styles.SPINNER.apply("PLAN");
+            case BYPASS -> Styles.ERROR.apply("BYPASS");
+        };
         String model = activeProvider != null ? activeProvider.getModel() : "";
         if (usageIn > 0 || usageOut > 0) {
             model += "  ↑" + compact(usageIn) + " ↓" + compact(usageOut) + " tok";
         }
-        String left = Styles.STATUS_PROVIDER.apply(providerName);
         String right = Styles.STATUS_MODEL.apply(model);
         int usable = Math.max(width - 2, 1);
         int leftLen = left.replaceAll("\u001B\\[[0-9;]*m", "").length();
         String pad = " ".repeat(Math.max(1, usable - leftLen - right.replaceAll("\u001B\\[[0-9;]*m", "").length()));
         return left + pad + right;
+    }
+
+    /** 待批准多行块（F8）：工具名 + 参数 + 原因 + 三选一菜单（光标高亮）。 */
+    private String approvalBlock(ApprovalRequest req, int cursor) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(Styles.TOOL_MARK.apply("● "))
+                .append(Styles.TOOL_NAME.apply(req.name()))
+                .append(Styles.MUTED.apply("(" + req.args() + ")"))
+                .append("\r\n");
+        sb.append(Styles.MUTED.apply("  原因：" + req.reason())).append("\r\n");
+        sb.append(Styles.INPUT_PROMPT.apply("  是否继续?")).append("\r\n");
+        String[] items = {
+                "1. 允许本次",
+                "2. 永久允许（写入本地配置）",
+                "3. 拒绝本次"
+        };
+        for (int i = 0; i < items.length; i++) {
+            String prefix = i == cursor ? Styles.SELECT_ACTIVE.apply("  > ") : "    ";
+            String label = i == cursor ? Styles.SELECT_ACTIVE.apply(items[i]) : Styles.MUTED.apply(items[i]);
+            sb.append(prefix).append(label).append("\r\n");
+        }
+        sb.append(Styles.MUTED.apply("  ↑↓ 选择 · 回车确认 · 数字键直选 · Esc 取消"));
+        return sb.toString();
     }
 
     /** 用量紧凑格式（如 1.2k）。 */
