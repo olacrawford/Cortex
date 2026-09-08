@@ -3,13 +3,15 @@ package com.cortex.smoke;
 import com.cortex.agent.Agent;
 import com.cortex.agent.AgentEvent;
 import com.cortex.agent.CancelToken;
-import com.cortex.agent.Mode;
 import com.cortex.config.AppConfig;
 import com.cortex.config.ConfigLoader;
 import com.cortex.conversation.ConversationManager;
 import com.cortex.llm.LlmClient;
+import com.cortex.permission.Mode;
+import com.cortex.permission.PermissionEngine;
 import com.cortex.tool.ToolRegistry;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
 
@@ -32,14 +34,16 @@ public final class SmokeMain {
 
         LlmClient client = LlmClient.create(providerCfg);
         ConversationManager conv = new ConversationManager();
-        Agent agent = new Agent(client, ToolRegistry.createDefault(), "smoke");
+        // 非交互无法人在回路：BYPASS 跳过 Ask（黑名单/沙箱仍拦）；用例文件操作须落 cwd 内
+        PermissionEngine engine = PermissionEngine.create(Path.of("").toAbsolutePath());
+        Agent agent = new Agent(client, ToolRegistry.createDefault(), "smoke", engine);
         CancelToken cancel = new CancelToken();
 
         System.out.println("provider=" + providerCfg.getName() + " protocol=" + providerCfg.getProtocol());
         for (String msg : messages) {
             conv.addUserMessage(msg);
             System.out.println("\n>>> " + msg);
-            BlockingQueue<AgentEvent> queue = agent.run(conv, Mode.NORMAL, cancel);
+            BlockingQueue<AgentEvent> queue = agent.run(conv, Mode.DEFAULT, cancel);
             while (true) {
                 AgentEvent e = queue.take();
                 if (e instanceof AgentEvent.Text t) {

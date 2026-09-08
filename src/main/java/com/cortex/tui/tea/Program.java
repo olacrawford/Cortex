@@ -133,6 +133,7 @@ public class Program {
         m.bind(new KeyPressMessage("backspace", new char[]{127}), KeyMap.del());
         m.bind(new KeyPressMessage("backspace", new char[]{8}), "\b");
         m.bind(new KeyPressMessage("up", new char[0]), "\u001b[A");
+        m.bind(new KeyPressMessage("shift+tab", new char[0]), "\u001b[Z");
         m.bind(new KeyPressMessage("down", new char[0]), "\u001b[B");
         m.bind(new KeyPressMessage("right", new char[0]), "\u001b[C");
         m.bind(new KeyPressMessage("left", new char[0]), "\u001b[D");

@@ -9,6 +9,10 @@ import com.cortex.llm.SystemPrompt;
 import com.cortex.llm.ToolCall;
 import com.cortex.llm.ToolDef;
 import com.cortex.llm.ToolResult;
+import com.cortex.permission.Decision;
+import com.cortex.permission.Mode;
+import com.cortex.permission.Outcome;
+import com.cortex.permission.PermissionEngine;
 import com.cortex.prompt.Environment;
 import com.cortex.prompt.Prompt;
 import com.cortex.prompt.Reminder;
@@ -16,8 +20,10 @@ import com.cortex.tool.Result;
 import com.cortex.tool.ToolRegistry;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -52,11 +58,13 @@ public final class Agent {
     private final LlmClient client;
     private final ToolRegistry registry;
     private final String version;
+    private final PermissionEngine engine;
 
-    public Agent(LlmClient client, ToolRegistry registry, String version) {
+    public Agent(LlmClient client, ToolRegistry registry, String version, PermissionEngine engine) {
         this.client = client;
         this.registry = registry;
         this.version = version == null ? "" : version;
+        this.engine = engine;
     }
 
     /**
@@ -124,7 +132,7 @@ public final class Agent {
             // 有工具调用：记历史 → 分批执行 → 结果回灌（含已取消占位，F6）
             conv.addAssistantWithToolCalls(once.text(), once.calls());
             unknownRun = allUnknown(once.calls()) ? unknownRun + 1 : 0;
-            BatchOutcome batch = executeBatched(once.calls(), cancel, out);
+            BatchOutcome batch = executeBatched(once.calls(), mode, cancel, out);
             conv.addToolResults(batch.results());
 
             // 执行中取消是最高优先级终止——跳过未知工具与上限检查
@@ -198,7 +206,8 @@ public final class Agent {
      * 事件时序：Start 按调用序先发，End 也按调用序后发——并发只发生在执行环节，
      * UI 看到的顺序始终是调用序（N3）。每个工具受 per-tool 超时约束（N1）。
      */
-    private BatchOutcome executeBatched(List<ToolCall> calls, CancelToken cancel, BlockingQueue<AgentEvent> out)
+    private BatchOutcome executeBatched(List<ToolCall> calls, Mode mode, CancelToken cancel,
+                                        BlockingQueue<AgentEvent> out)
             throws InterruptedException {
         ToolResult[] results = new ToolResult[calls.size()];
         int i = 0;
@@ -212,22 +221,39 @@ public final class Agent {
                 }
                 ToolCall call = calls.get(i);
                 if (registry.isReadOnly(call.name())) {
-                    i = executeReadOnlyBatch(calls, i, executor, cancel, out, results);
+                    i = executeReadOnlyBatch(calls, i, executor, mode, cancel, out, results);
                 } else {
-                    i = executeSingle(calls, i, executor, cancel, out, results);
+                    int next = executeSingle(calls, i, executor, mode, cancel, out, results);
+                    if (next < 0) {
+                        // 人在回路等待中被取消：当前项已置为已取消，收尾剩余项
+                        for (int k = i + 1; k < calls.size(); k++) {
+                            results[k] = new ToolResult(calls.get(k).id(), NOTICE_CANCELLED, true);
+                        }
+                        return new BatchOutcome(List.of(results), false);
+                    }
+                    i = next;
                 }
             }
         }
         return new BatchOutcome(List.of(results), true);
     }
 
-    /** 并发执行 [from, to) 内的连续只读调用；返回段尾下标。 */
-    private int executeReadOnlyBatch(List<ToolCall> calls, int from, ExecutorService executor,
+    /**
+     * 并发执行 [from, to) 内的连续只读调用；返回段尾下标。
+     * 权限检查逐个进行（N3）：只读永不 Ask；被拒项不进入并发执行，
+     * 但 Start/End 事件仍按调用序发出（isError 区分），与其他项互不串位。
+     */
+    private int executeReadOnlyBatch(List<ToolCall> calls, int from, ExecutorService executor, Mode mode,
                                      CancelToken cancel, BlockingQueue<AgentEvent> out, ToolResult[] results)
             throws InterruptedException {
         int to = from;
         while (to < calls.size() && registry.isReadOnly(calls.get(to).name())) {
             to++;
+        }
+        // 前四层判定（黑名单/沙箱/规则/模式兜底；只读兜底恒 Allow）
+        PermissionEngine.CheckResult[] checks = new PermissionEngine.CheckResult[to - from];
+        for (int k = from; k < to; k++) {
+            checks[k - from] = engine.check(mode, calls.get(k), true);
         }
         // Start 事件按调用序先发（动态区同时列出多个在执行的工具行）
         for (int k = from; k < to; k++) {
@@ -235,13 +261,20 @@ public final class Agent {
         }
         List<Future<Result>> futures = new ArrayList<>();
         for (int k = from; k < to; k++) {
+            if (checks[k - from].decision() == Decision.DENY) {
+                futures.add(null); // 被拒项不执行
+                continue;
+            }
             ToolCall c = calls.get(k);
             futures.add(executor.submit(() -> registry.execute(c.name(), c.args())));
         }
         // End 事件按调用序逐个落 scrollback；只写各自下标，无竞争（N6）
         for (int k = from; k < to; k++) {
+            PermissionEngine.CheckResult cr = checks[k - from];
             Result r;
-            if (cancel.isCancelled()) {
+            if (cr.decision() == Decision.DENY) {
+                r = Result.error(cr.reason());
+            } else if (cancel.isCancelled()) {
                 futures.get(k - from).cancel(true);
                 r = Result.error(NOTICE_CANCELLED);
             } else {
@@ -253,17 +286,73 @@ public final class Agent {
         return to;
     }
 
-    /** 串行执行单个有副作用调用；返回下一个下标。 */
-    private int executeSingle(List<ToolCall> calls, int i, ExecutorService executor,
+    /** 串行执行单个有副作用调用（含权限判定与人在回路）；返回下一个下标，-1 表示已取消。 */
+    private int executeSingle(List<ToolCall> calls, int i, ExecutorService executor, Mode mode,
                               CancelToken cancel, BlockingQueue<AgentEvent> out, ToolResult[] results)
             throws InterruptedException {
         ToolCall call = calls.get(i);
-        emit(out, cancel, toolEvent(call, Phase.START, "", false));
-        Future<Result> future = executor.submit(() -> registry.execute(call.name(), call.args()));
-        Result r = await(future, cancel);
+        PermissionEngine.CheckResult cr = engine.check(mode, call, false);
+        Result r = switch (cr.decision()) {
+            case DENY -> {
+                emit(out, cancel, toolEvent(call, Phase.START, "", false));
+                yield Result.error(cr.reason());
+            }
+            case ASK -> {
+                Outcome o = requestApproval(call, cr.reason(), cancel, out);
+                if (o == null) {
+                    results[i] = new ToolResult(call.id(), NOTICE_CANCELLED, true);
+                    yield null; // 取消：由调用方收尾剩余调用
+                }
+                if (o == Outcome.ALLOW_FOREVER) {
+                    try {
+                        engine.persistLocalAllow(call);
+                    } catch (IOException e) {
+                        emit(out, cancel, new AgentEvent.Notice("永久放行规则写入失败：" + e.getMessage()));
+                    }
+                }
+                if (o == Outcome.DENY_ONCE) {
+                    emit(out, cancel, toolEvent(call, Phase.START, "", false));
+                    yield Result.error("用户拒绝本次调用");
+                } else {
+                    emit(out, cancel, toolEvent(call, Phase.START, "", false));
+                    Future<Result> future = executor.submit(() -> registry.execute(call.name(), call.args()));
+                    yield await(future, cancel);
+                }
+            }
+            case ALLOW -> {
+                emit(out, cancel, toolEvent(call, Phase.START, "", false));
+                Future<Result> future = executor.submit(() -> registry.execute(call.name(), call.args()));
+                yield await(future, cancel);
+            }
+        };
+        if (r == null) {
+            return -1; // 人在回路等待中被取消
+        }
         results[i] = new ToolResult(call.id(), r.content(), r.isError());
         emit(out, cancel, toolEvent(call, Phase.END, r.content(), r.isError()));
         return i + 1;
+    }
+
+    /**
+     * 第五层人在回路（F8）：发 Approval 事件并阻塞等 TUI 回传用户三选一。
+     * 返回 null 表示已取消（中断或 per-turn cancel 已触发）。
+     */
+    private Outcome requestApproval(ToolCall call, String reason, CancelToken cancel,
+                                    BlockingQueue<AgentEvent> out) throws InterruptedException {
+        if (cancel.isCancelled()) {
+            return null;
+        }
+        BlockingQueue<Outcome> respond = new ArrayBlockingQueue<>(1);
+        if (!emit(out, cancel, new AgentEvent.Approval(
+                new ApprovalRequest(call.name(), preview(call.args()), reason, respond)))) {
+            return null;
+        }
+        try {
+            return respond.take();
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            return null;
+        }
     }
 
     /** per-tool 超时 + 取消感知的结果等待。 */

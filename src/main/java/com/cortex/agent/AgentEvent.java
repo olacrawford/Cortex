@@ -21,6 +21,9 @@ public sealed interface AgentEvent {
     /** 系统提示（停止原因等）；仅 UI 展示，不入历史。 */
     record Notice(String message) implements AgentEvent {}
 
+    /** 人在回路：工具调用等待用户批准（三选一，F8）。消费者必须回传 Outcome 解阻塞。 */
+    record Approval(ApprovalRequest request) implements AgentEvent {}
+
     /** 本轮（整个 Loop）结束。 */
     record Done() implements AgentEvent {}
 

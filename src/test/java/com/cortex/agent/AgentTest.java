@@ -6,6 +6,9 @@ import com.cortex.llm.LlmClient;
 import com.cortex.llm.Request;
 import com.cortex.llm.StreamEvent;
 import com.cortex.llm.ToolDef;
+import com.cortex.permission.Mode;
+import com.cortex.permission.Outcome;
+import com.cortex.permission.PermissionEngine;
 import com.cortex.tool.Result;
 import com.cortex.tool.Tool;
 import com.cortex.tool.ToolRegistry;
@@ -24,6 +27,13 @@ import java.util.concurrent.atomic.AtomicLong;
 import static org.junit.jupiter.api.Assertions.*;
 
 class AgentTest {
+
+    @org.junit.jupiter.api.io.TempDir
+    java.nio.file.Path root;
+
+    private PermissionEngine engine() {
+        return PermissionEngine.create(root);
+    }
 
     /** 脚本化假客户端：每次 stream() 逐次回放脚本；脚本耗尽后回放 defaultResponse；记录收到的 Request。 */
     private static final class FakeClient implements LlmClient {
@@ -159,6 +169,15 @@ class AgentTest {
 
     /** 逐条取事件直到 Done（Agent 保证任何路径都以 Done 收尾），限时兜底。 */
     private static List<AgentEvent> drain(BlockingQueue<AgentEvent> queue) throws InterruptedException {
+        return drain(queue, Outcome.DENY_ONCE); // 测试无 UI：默认自动"拒绝本次"防挂起
+    }
+
+    /**
+     * 逐条取事件直到 Done。收到 Approval（人在回路）时：
+     * autoOutcome 非空则自动回传（默认自动拒绝，防测试挂起）；为 null 则原样返回由调用方决策。
+     */
+    private static List<AgentEvent> drain(BlockingQueue<AgentEvent> queue, Outcome autoOutcome)
+            throws InterruptedException {
         List<AgentEvent> events = new ArrayList<>();
         long deadline = System.currentTimeMillis() + 15000;
         while (System.currentTimeMillis() < deadline) {
@@ -167,6 +186,12 @@ class AgentTest {
                 continue;
             }
             events.add(e);
+            if (e instanceof AgentEvent.Approval a) {
+                if (autoOutcome != null) {
+                    a.request().respond().offer(autoOutcome);
+                }
+                continue;
+            }
             if (e instanceof AgentEvent.Done) {
                 return events;
             }
@@ -177,11 +202,11 @@ class AgentTest {
 
     private static List<AgentEvent> runAndDrain(Agent agent, ConversationManager conv, CancelToken cancel)
             throws InterruptedException {
-        return drain(agent.run(conv, Mode.NORMAL, cancel));
+        return drain(agent.run(conv, Mode.DEFAULT, cancel));
     }
 
-    private static Agent agent(FakeClient client, ToolRegistry registry) {
-        return new Agent(client, registry, "test");
+    private Agent agent(FakeClient client, ToolRegistry registry) {
+        return new Agent(client, registry, "test", engine());
     }
 
     // ─── 场景 A：多轮链路（AC1/AC2/AC6/AC7/F6）───
@@ -349,7 +374,8 @@ class AgentTest {
 
         ConversationManager conv = new ConversationManager();
         conv.addUserMessage("批量执行");
-        runAndDrain(agent(client, registry), conv, new CancelToken());
+        // BYPASS：免 Ask，专注验证分批并发与保序
+        drain(agent(client, registry).run(conv, Mode.BYPASS, new CancelToken()));
 
         // 两只读确实并发（峰值 ≥2），有副作用工具在其后开始
         assertTrue(peak.get() >= 2, "两只读应并发执行，峰值=" + peak.get());
@@ -386,15 +412,16 @@ class AgentTest {
         ConversationManager conv = new ConversationManager();
         conv.addUserMessage("会卡住的任务");
         CancelToken cancel = new CancelToken();
-        BlockingQueue<AgentEvent> queue = agent(client, registry).run(conv, Mode.NORMAL, cancel);
+        BlockingQueue<AgentEvent> queue = agent(client, registry).run(conv, Mode.DEFAULT, cancel);
 
-        // 看到工具 START 后，等工具进入执行再取消
+        // 人在回路：Approval 到达（阻塞中的工具调用）→ 模拟用户先取消（TUI 行为：兜底 DENY_ONCE + cancel）
         long deadline = System.currentTimeMillis() + 5000;
         while (System.currentTimeMillis() < deadline) {
             AgentEvent e = queue.poll(50, TimeUnit.MILLISECONDS);
-            if (e instanceof AgentEvent.Tool t && t.event().phase() == Phase.START) {
-                Thread.sleep(150); // 确保 execute 已进入阻塞
+            if (e instanceof AgentEvent.Approval a) {
+                Thread.sleep(150); // 确保 agent 已阻塞在 respond.take()
                 cancel.cancel();
+                a.request().respond().offer(Outcome.DENY_ONCE);
                 break;
             }
             if (e instanceof AgentEvent.Done) {
@@ -478,7 +505,7 @@ class AgentTest {
 
         ConversationManager conv = new ConversationManager();
         conv.addUserMessage("hi");
-        drain(agent(client, registry).run(conv, Mode.NORMAL, new CancelToken()));
+        drain(agent(client, registry).run(conv, Mode.DEFAULT, new CancelToken()));
 
         // 普通模式：全量工具、无 reminder（F7）
         assertEquals(6, client.reqs.get(0).tools().size());
@@ -519,6 +546,159 @@ class AgentTest {
         client.streamCalls();
         runAndDrain(agent(client, registry), conv, new CancelToken());
         assertEquals("恢复后正常。", conv.getMessages().get(conv.size() - 1).getContent());
+    }
+
+    // ─── 阶段5：权限集成 ───
+
+    @Test
+    void 沙箱拒绝回灌不中断_Loop继续() throws Exception {
+        StubTool stub = new StubTool("read_file", true, Result.ok("x"));
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(stub);
+
+        FakeClient client = new FakeClient();
+        client.enqueue(List.of( // 请求读项目根之外的文件 → 沙箱 DENY
+                new StreamEvent.ToolCallComplete("c1", "read_file", "{\"path\":\"/etc/passwd\"}"),
+                new StreamEvent.StreamEnd("tool_use", 0, 0)));
+        client.enqueue(List.of(
+                new StreamEvent.TextDelta("被拒了，换路径。"),
+                new StreamEvent.StreamEnd("stop", 0, 0)));
+
+        ConversationManager conv = new ConversationManager();
+        conv.addUserMessage("读 /etc/passwd");
+        List<AgentEvent> list = runAndDrain(agent(client, registry), conv, new CancelToken());
+
+        // 被拒结果 isError=true 且含原因，Loop 未中断、走到次轮文本
+        ToolEvent end = list.stream()
+                .filter(e -> e instanceof AgentEvent.Tool t && t.event().phase() == Phase.END)
+                .map(e -> ((AgentEvent.Tool) e).event())
+                .findFirst().orElseThrow();
+        assertTrue(end.isError());
+        assertTrue(end.result().contains("项目目录之外"));
+        assertTrue(list.stream().anyMatch(e -> e instanceof AgentEvent.Text t
+                && t.delta().equals("被拒了，换路径。")));
+        assertInstanceOf(AgentEvent.Done.class, list.get(list.size() - 1));
+        assertEquals("被拒了，换路径。", conv.getMessages().get(conv.size() - 1).getContent());
+    }
+
+    @Test
+    void 人在回路_允许本次则执行_拒绝则回灌() throws Exception {
+        StubTool stub = new StubTool("write_file", false, Result.ok("已写入"));
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(stub);
+
+        // 场景一：用户选"允许本次" → 执行
+        FakeClient client = new FakeClient();
+        client.enqueue(List.of(
+                new StreamEvent.ToolCallComplete("c1", "write_file", "{\"path\":\"out.txt\"}"),
+                new StreamEvent.StreamEnd("tool_use", 0, 0)));
+        client.enqueue(List.of(
+                new StreamEvent.TextDelta("写完了。"),
+                new StreamEvent.StreamEnd("stop", 0, 0)));
+        ConversationManager conv = new ConversationManager();
+        conv.addUserMessage("写文件");
+        BlockingQueue<AgentEvent> queue = agent(client, registry).run(conv, Mode.DEFAULT, new CancelToken());
+        List<AgentEvent> events = new ArrayList<>();
+        while (true) {
+            AgentEvent e = queue.poll(100, TimeUnit.MILLISECONDS);
+            if (e == null) continue;
+            events.add(e);
+            if (e instanceof AgentEvent.Approval a) {
+                assertEquals("default 模式下 文件写 类操作需确认", a.request().reason());
+                a.request().respond().offer(Outcome.ALLOW_ONCE);
+            } else if (e instanceof AgentEvent.Done) break;
+        }
+        assertEquals(1, stub.executions);
+        assertEquals("写完了。", conv.getMessages().get(conv.size() - 1).getContent());
+
+        // 场景二：用户选"拒绝本次" → 被拒回灌、Loop 继续
+        StubTool stub2 = new StubTool("write_file", false, Result.ok("不应执行"));
+        ToolRegistry registry2 = new ToolRegistry();
+        registry2.register(stub2);
+        FakeClient client2 = new FakeClient();
+        client2.enqueue(List.of(
+                new StreamEvent.ToolCallComplete("c2", "write_file", "{\"path\":\"out2.txt\"}"),
+                new StreamEvent.StreamEnd("tool_use", 0, 0)));
+        client2.enqueue(List.of(
+                new StreamEvent.TextDelta("好的，我不写了。"),
+                new StreamEvent.StreamEnd("stop", 0, 0)));
+        ConversationManager conv2 = new ConversationManager();
+        conv2.addUserMessage("写文件");
+        List<AgentEvent> list2 = runAndDrain(agent(client2, registry2), conv2, new CancelToken());
+        assertEquals(0, stub2.executions); // 未执行
+        ToolEvent denied = list2.stream()
+                .filter(e -> e instanceof AgentEvent.Tool t && t.event().phase() == Phase.END)
+                .map(e -> ((AgentEvent.Tool) e).event())
+                .findFirst().orElseThrow();
+        assertTrue(denied.isError());
+        assertTrue(denied.result().contains("用户拒绝"));
+        assertEquals("好的，我不写了。", conv2.getMessages().get(conv2.size() - 1).getContent());
+    }
+
+    @Test
+    void 人在回路_永久允许_写本地配置() throws Exception {
+        StubTool stub = new StubTool("write_file", false, Result.ok("已写入"));
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(stub);
+
+        FakeClient client = new FakeClient();
+        client.enqueue(List.of(
+                new StreamEvent.ToolCallComplete("c1", "write_file", "{\"path\":\"keep.txt\"}"),
+                new StreamEvent.StreamEnd("tool_use", 0, 0)));
+        client.enqueue(List.of(
+                new StreamEvent.TextDelta("完成。"),
+                new StreamEvent.StreamEnd("stop", 0, 0)));
+
+        ConversationManager conv = new ConversationManager();
+        conv.addUserMessage("写文件");
+        BlockingQueue<AgentEvent> queue = agent(client, registry).run(conv, Mode.DEFAULT, new CancelToken());
+        while (true) {
+            AgentEvent e = queue.poll(100, TimeUnit.MILLISECONDS);
+            if (e instanceof AgentEvent.Approval a) {
+                a.request().respond().offer(Outcome.ALLOW_FOREVER);
+            } else if (e instanceof AgentEvent.Done) break;
+        }
+        assertEquals(1, stub.executions);
+        // 永久规则写入本地层配置文件
+        java.nio.file.Path localPath = root.resolve(".cortex/settings.local.yaml");
+        assertTrue(java.nio.file.Files.exists(localPath));
+        String yaml = java.nio.file.Files.readString(localPath);
+        assertTrue(yaml.contains("Write(keep.txt)"), yaml);
+        // 引擎内存规则集同步更新：再次请求同路径不再 Ask（直接放行执行）
+        FakeClient client2 = new FakeClient();
+        client2.enqueue(List.of(
+                new StreamEvent.ToolCallComplete("c2", "write_file", "{\"path\":\"keep.txt\"}"),
+                new StreamEvent.StreamEnd("tool_use", 0, 0)));
+        client2.enqueue(List.of(
+                new StreamEvent.TextDelta("又写完了。"),
+                new StreamEvent.StreamEnd("stop", 0, 0)));
+        ConversationManager conv2 = new ConversationManager();
+        conv2.addUserMessage("再写一次");
+        List<AgentEvent> list2 = runAndDrain(agent(client2, registry), conv2, new CancelToken());
+        assertTrue(list2.stream().noneMatch(e -> e instanceof AgentEvent.Approval));
+        assertEquals(2, stub.executions);
+    }
+
+    @Test
+    void 只读批量不触发人在回路() throws Exception {
+        StubTool ro = new StubTool("read_file", true, Result.ok("内容"));
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(ro);
+
+        FakeClient client = new FakeClient();
+        client.enqueue(List.of(
+                new StreamEvent.ToolCallComplete("1", "read_file", "{\"path\":\"a.txt\"}"),
+                new StreamEvent.ToolCallComplete("2", "read_file", "{\"path\":\"b.txt\"}"),
+                new StreamEvent.StreamEnd("tool_use", 0, 0)));
+        client.enqueue(List.of(
+                new StreamEvent.TextDelta("读完。"),
+                new StreamEvent.StreamEnd("stop", 0, 0)));
+
+        ConversationManager conv = new ConversationManager();
+        conv.addUserMessage("读两个文件");
+        List<AgentEvent> list = runAndDrain(agent(client, registry), conv, new CancelToken());
+        assertTrue(list.stream().noneMatch(e -> e instanceof AgentEvent.Approval), "只读永不 Ask（N3）");
+        assertEquals(2, ro.executions);
     }
 
     // ─── preview ───
