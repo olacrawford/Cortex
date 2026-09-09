@@ -30,3 +30,11 @@ providers:
 #   model      模型名（状态栏右侧显示）
 #   thinking   可选；仅 anthropic 生效（扩展思考）
 #   context_window  可选；上下文窗口（token），未配置时按 protocol 默认
+#
+# ch09 记忆与会话持久化说明：
+#   - 项目指令：<project_root>/MEWCODE.md、<project_root>/.cortex/MEWCODE.md、~/.cortex/MEWCODE.md
+#     三层按此优先级合并（高优先级在前），支持 @include 引用其他文件。
+#   - 会话存档：.cortex/sessions/<session_id>/conversation.jsonl（JSONL 追加写），
+#     工具结果落盘在 .cortex/sessions/<session_id>/tool-results/。
+#   - 自动笔记：.cortex/memory/（项目级）与 ~/.cortex/memory/（用户级），索引文件 MEMORY.md。
+#   - 这些目录均由程序自动创建，无需手动配置。

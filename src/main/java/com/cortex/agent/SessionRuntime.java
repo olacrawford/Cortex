@@ -21,12 +21,13 @@ public final class SessionRuntime {
     public final ContentReplacementState replacement;
     public final Recovery.RecoveryState recovery;
     public final AutoCompactTrackingState autoTracking;
-    public final SessionContext session;
+    public volatile SessionContext session;   // /resume 恢复时替换为新会话
     public volatile int contextWindow;
 
     private final ReentrantLock anchorLock = new ReentrantLock();
     private long usageAnchor;     // 上一次主对话路径 Stream 真实 usage 之和；摘要请求不更新此字段
     private int anchorMsgLen;     // anchor 当时 conversation.size()，下次估算只算这之后的字符增量
+    private long turnCount;       // 已完成的自然回合数（ch09 记忆更新触发用）
 
     public SessionRuntime(ContentReplacementState replacement, Recovery.RecoveryState recovery,
                           AutoCompactTrackingState autoTracking, SessionContext session, int contextWindow) {
@@ -71,6 +72,25 @@ public final class SessionRuntime {
         try {
             this.usageAnchor = anchor;
             this.anchorMsgLen = msgLen;
+        } finally {
+            anchorLock.unlock();
+        }
+    }
+
+    /** 已完成的自然回合数（ch09 记忆更新每 5 轮触发用）。 */
+    public long getTurnCount() {
+        anchorLock.lock();
+        try {
+            return turnCount;
+        } finally {
+            anchorLock.unlock();
+        }
+    }
+
+    public void bumpTurnCount() {
+        anchorLock.lock();
+        try {
+            turnCount++;
         } finally {
             anchorLock.unlock();
         }

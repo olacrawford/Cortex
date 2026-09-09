@@ -29,8 +29,13 @@ public final class Prompt {
 
     /** 完整稳定系统提示 = 七个固定模块 + 可选空槽（当前为空，自动跳过）。 */
     public static String buildSystemPrompt() {
+        return buildSystemPrompt("", "");
+    }
+
+    /** 完整稳定系统提示 = 七个固定模块 + 可选空槽（custom_instructions / memory 可注入）。 */
+    public static String buildSystemPrompt(String instructions, String memory) {
         List<Module> all = new ArrayList<>(Modules.fixedModules());
-        all.addAll(Modules.optionalModules());
+        all.addAll(Modules.optionalModules(instructions, memory));
         return assembleSystem(all);
     }
 

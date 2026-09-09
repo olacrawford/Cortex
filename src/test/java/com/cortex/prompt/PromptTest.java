@@ -56,4 +56,21 @@ class PromptTest {
         assertTrue(sys.contains("Prefer the dedicated tools (read_file, glob, grep)")); // 优先专用工具
         assertTrue(sys.contains("Before editing a file you must read it first")); // 编辑前必先读
     }
+
+    @Test
+    void 参数化注入指令与记忆() {
+        String sys = Prompt.buildSystemPrompt("项目规范", "记忆索引");
+        assertTrue(sys.contains("项目规范"));
+        assertTrue(sys.contains("记忆索引"));
+        // custom_instructions(80) 优先级低于 memory(100)，故在前
+        assertTrue(sys.indexOf("项目规范") < sys.indexOf("记忆索引"));
+    }
+
+    @Test
+    void 空参数跳过可选槽() {
+        String sys = Prompt.buildSystemPrompt("", "");
+        assertFalse(sys.contains("custom_instructions"));
+        assertFalse(sys.contains("long-term-memory"));
+        assertFalse(sys.contains("记忆索引"));
+    }
 }

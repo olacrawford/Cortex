@@ -8,15 +8,23 @@ import com.cortex.agent.CompactEvent;
 import com.cortex.agent.Phase;
 import com.cortex.agent.SessionRuntime;
 import com.cortex.agent.ToolEvent;
+import com.cortex.compact.ContextCompactor;
+import com.cortex.compact.Token;
+import com.cortex.compact.state.SessionContext;
 import com.cortex.config.ProviderConfig;
 import com.cortex.conversation.ConversationManager;
 import com.cortex.llm.LlmClient;
 import com.cortex.llm.ToolDef;
+import com.cortex.memory.Manager;
 import com.cortex.permission.Mode;
 import com.cortex.permission.Outcome;
 import com.cortex.permission.PermissionEngine;
 import com.cortex.prompt.Prompt;
 import com.cortex.prompt.Reminder;
+import com.cortex.session.SessionInfo;
+import com.cortex.session.SessionList;
+import com.cortex.session.SessionLoader;
+import com.cortex.session.Writer;
 import com.cortex.tool.ToolRegistry;
 import com.cortex.tui.tea.Command;
 import com.cortex.tui.tea.CompactNoticeMessage;
@@ -31,6 +39,8 @@ import com.cortex.tui.tea.UpdateResult;
 import com.cortex.tui.tea.WindowSizeMessage;
 
 
+import java.io.IOException;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -54,7 +64,18 @@ public class CortexModel implements Model {
     private final ToolRegistry registry;
     private final PermissionEngine engine;
     private final SessionRuntime runtime;
-    private final ConversationManager conversation = new ConversationManager();
+    private final Manager memMgr;
+    private final String instructionText;
+    private final String memoryText;
+    private final Path sessionsDir;
+    private ConversationManager conversation = new ConversationManager();
+
+    // /resume 会话列表状态（ch09）
+    private Writer writer;
+    private List<SessionInfo> allResumeSessions = List.of();
+    private List<SessionInfo> resumeList = List.of();
+    private int resumeIndex;
+    private String resumeFilter = "";
 
     private AppState state = AppState.CHAT;
     private int width = 80;
@@ -93,10 +114,24 @@ public class CortexModel implements Model {
 
     public CortexModel(List<ProviderConfig> providers, ToolRegistry registry, PermissionEngine engine,
                        SessionRuntime runtime) {
+        this(providers, registry, engine, runtime, null, null, "", "", Path.of("").toAbsolutePath());
+    }
+
+    public CortexModel(List<ProviderConfig> providers, ToolRegistry registry, PermissionEngine engine,
+                       SessionRuntime runtime, Writer writer, Manager memMgr,
+                       String instructionText, String memoryText, Path sessionsDir) {
         this.providers = providers;
         this.registry = registry;
         this.engine = engine;
         this.runtime = runtime;
+        this.writer = writer;
+        this.memMgr = memMgr;
+        this.instructionText = instructionText == null ? "" : instructionText;
+        this.memoryText = memoryText == null ? "" : memoryText;
+        this.sessionsDir = sessionsDir;
+        if (writer != null) {
+            this.conversation = new ConversationManager(writer::onAppend, writer::onReplace);
+        }
         this.mode = engine.startMode();
         if (providers.size() == 1) {
             this.state = AppState.CHAT;
@@ -216,6 +251,10 @@ public class CortexModel implements Model {
         if (pending != null) {
             return onApprovalKey(key);
         }
+        // /resume 会话列表导航（ch09）
+        if (state == AppState.RESUMING) {
+            return onResumeKey(key);
+        }
         switch (key.key()) {
             case "shift+tab" -> {
                 // 仅空闲态生效：循环切换权限模式（F7），跨轮保持
@@ -295,6 +334,13 @@ public class CortexModel implements Model {
         this.client = LlmClient.create(provider);
         this.runtime.contextWindow = provider.effectiveContextWindow();
         this.agent = new Agent(client, registry, Prompt.VERSION, engine, runtime);
+        agent.setMemory(memMgr, instructionText, memoryText);
+        if (memMgr != null) {
+            memMgr.setProvider(client, provider.getModel());
+        }
+        if (writer != null) {
+            writer.setModel(provider.getModel());
+        }
     }
 
     // ─── 提交一轮对话 ───
@@ -499,11 +545,35 @@ public class CortexModel implements Model {
         StringBuilder sb = new StringBuilder();
         if (state == AppState.PROVIDER_SELECT) {
             renderProviderSelect(sb);
+        } else if (state == AppState.RESUMING) {
+            sb.append(renderResume());
         } else {
             renderChat(sb);
         }
         if (sb.length() == 0) {
             sb.append(" ");
+        }
+        return sb.toString();
+    }
+
+    private String renderResume() {
+        StringBuilder sb = new StringBuilder();
+        sb.append(bannerBlock());
+        sb.append("\r\n选择要恢复的会话（输入字符搜索，Enter 恢复，Esc 取消）\r\n\r\n");
+        if (resumeList.isEmpty()) {
+            sb.append("  （无匹配会话）\r\n");
+        }
+        for (int i = 0; i < resumeList.size(); i++) {
+            SessionInfo s = resumeList.get(i);
+            String label = s.title() + "  ·  " + (s.model() == null ? "?" : s.model())
+                    + "  ·  " + s.size() + "B";
+            String marker = i == resumeIndex ? "▸ " : "  ";
+            sb.append(marker)
+                    .append(i == resumeIndex ? Styles.SELECT_ACTIVE.apply(label) : Styles.SELECT_IDLE.apply(label))
+                    .append("\r\n");
+        }
+        if (!resumeFilter.isEmpty()) {
+            sb.append("\r\n搜索: ").append(resumeFilter).append("\r\n");
         }
         return sb.toString();
     }
@@ -638,6 +708,121 @@ public class CortexModel implements Model {
     /** /exit：退出主循环。 */
     UpdateResult<? extends Model> commandExit() {
         return new UpdateResult<>(this, Command.quit());
+    }
+
+    /** /resume：进入会话列表恢复流程（仅空闲态可用）。 */
+    UpdateResult<? extends Model> commandResume() {
+        if (state != AppState.CHAT || streaming) {
+            return pushSystemMessage("请等待当前任务完成");
+        }
+        try {
+            List<SessionInfo> all = SessionList.list(sessionsDir);
+            if (all.isEmpty()) {
+                return pushSystemMessage("没有可恢复的会话");
+            }
+            this.allResumeSessions = all;
+            this.resumeList = filterResume(all, "");
+            this.resumeIndex = 0;
+            this.resumeFilter = "";
+            this.state = AppState.RESUMING;
+            return new UpdateResult<>(this, Command.println(renderResume()));
+        } catch (IOException e) {
+            return pushSystemMessage("会话扫描失败: " + e.getMessage());
+        }
+    }
+
+    // ─── /resume 会话列表导航（ch09）───
+
+    private UpdateResult<? extends Model> onResumeKey(KeyPressMessage key) {
+        switch (key.key()) {
+            case "up", "left" -> {
+                resumeIndex = (resumeIndex - 1 + resumeList.size()) % resumeList.size();
+                return new UpdateResult<>(this, null);
+            }
+            case "down", "right" -> {
+                resumeIndex = (resumeIndex + 1) % resumeList.size();
+                return new UpdateResult<>(this, null);
+            }
+            case "enter" -> {
+                if (resumeList.isEmpty()) {
+                    return new UpdateResult<>(this, null);
+                }
+                return doResumeSession(resumeList.get(resumeIndex));
+            }
+            case "esc", "ctrl+c" -> {
+                state = AppState.CHAT;
+                return new UpdateResult<>(this, null);
+            }
+            case "backspace" -> {
+                if (!resumeFilter.isEmpty()) {
+                    resumeFilter = resumeFilter.substring(0, resumeFilter.length() - 1);
+                    resumeList = filterResume(allResumeSessions, resumeFilter);
+                    resumeIndex = 0;
+                }
+                return new UpdateResult<>(this, null);
+            }
+            default -> {
+                String r = new String(key.runes());
+                if (!r.isEmpty()) {
+                    resumeFilter += r;
+                    resumeList = filterResume(allResumeSessions, resumeFilter);
+                    resumeIndex = 0;
+                }
+                return new UpdateResult<>(this, null);
+            }
+        }
+    }
+
+    private static List<SessionInfo> filterResume(List<SessionInfo> all, String filter) {
+        if (filter == null || filter.isEmpty()) {
+            return all;
+        }
+        String f = filter.toLowerCase();
+        return all.stream().filter(s -> s.title().toLowerCase().contains(f)).toList();
+    }
+
+    private UpdateResult<? extends Model> doResumeSession(SessionInfo info) {
+        try {
+            List<com.cortex.conversation.Message> loaded = SessionLoader.load(info.dir());
+            // token 超限时先压缩一次
+            int cw = runtime.contextWindow;
+            if (!loaded.isEmpty() && cw > 20000 + 13000) {
+                long est = Token.estimateTokens(0, loaded, 0);
+                if (est >= cw - 20000 - 13000) {
+                    try (Writer tmp = Writer.open(info.dir())) {
+                        ConversationManager tmpConv = ConversationManager.fromMessages(
+                                loaded, tmp::onAppend, tmp::onReplace);
+                        agent.runForceCompact(tmpConv, currentDefs());
+                        loaded = tmpConv.getMessages();
+                    }
+                }
+            }
+            // 时间跨度提醒（>6h）
+            long hours = Duration.between(info.modifiedAt(), java.time.Instant.now()).toHours();
+            if (hours > 6) {
+                loaded = new ArrayList<>(loaded);
+                loaded.add(new com.cortex.conversation.Message(com.cortex.conversation.Message.Role.USER,
+                        "[系统提示] 本会话已暂停 " + hours + " 小时。部分上下文可能已过时，如需最新信息请重新读取相关文件。"));
+            }
+            Writer newWriter = Writer.open(info.dir());
+            ConversationManager newConv = ConversationManager.fromMessages(
+                    loaded, newWriter::onAppend, newWriter::onReplace);
+            newWriter.setModel(activeProvider != null ? activeProvider.getModel() : null);
+            this.writer = newWriter;
+            this.conversation = newConv;
+            this.runtime.session = SessionContext.open(workspaceRoot(), info.id());
+            this.state = AppState.CHAT;
+            String msg = "已恢复会话 " + info.id() + "，共 " + loaded.size() + " 条消息";
+            committed.add(Styles.MUTED.apply("⊕ " + msg));
+            return new UpdateResult<>(this, Command.println(Styles.MUTED.apply("⊕ " + msg)));
+        } catch (Exception e) {
+            this.state = AppState.CHAT;
+            return pushSystemMessage("恢复失败: " + e.getMessage());
+        }
+    }
+
+    private Path workspaceRoot() {
+        return sessionsDir.getParent() == null ? Path.of("").toAbsolutePath() : sessionsDir.getParent().getParent();
     }
 
     /** /plan：切换 Plan Mode，输出提示。 */

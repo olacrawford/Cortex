@@ -13,6 +13,7 @@ import com.cortex.llm.SystemPrompt;
 import com.cortex.llm.ToolCall;
 import com.cortex.llm.ToolDef;
 import com.cortex.llm.ToolResult;
+import com.cortex.memory.Manager;
 import com.cortex.permission.Decision;
 import com.cortex.permission.Mode;
 import com.cortex.permission.Outcome;
@@ -75,6 +76,10 @@ public final class Agent {
     private final SessionRuntime runtime;
     private final ReentrantLock runLock = new ReentrantLock();
 
+    private Manager memMgr;                 // ch09 记忆管理器（可空：未注入则不触发）
+    private String instructionText = "";    // 项目指令（custom-instructions 模块）
+    private String memoryText = "";         // 长期记忆索引（long-term-memory 模块）
+
     public Agent(LlmClient client, ToolRegistry registry, String version, PermissionEngine engine) {
         this(client, registry, version, engine, SessionRuntime.empty(200000));
     }
@@ -86,6 +91,13 @@ public final class Agent {
         this.version = version == null ? "" : version;
         this.engine = engine;
         this.runtime = runtime;
+    }
+
+    /** 注入记忆管理器与系统提示的指令 / 记忆文本（ch09；由 Cortex 装配时调用）。 */
+    public void setMemory(Manager memMgr, String instructionText, String memoryText) {
+        this.memMgr = memMgr;
+        this.instructionText = instructionText == null ? "" : instructionText;
+        this.memoryText = memoryText == null ? "" : memoryText;
     }
 
     /**
@@ -141,7 +153,7 @@ public final class Agent {
             throws InterruptedException {
         // 环境信息（不缓存）与稳定系统提示（可缓存）在 run 起始构造一次，跨轮复用（F2/F3/N1）
         String envText = Environment.gather(this.version, "").render();
-        String sys = Prompt.buildSystemPrompt();
+        String sys = Prompt.buildSystemPrompt(instructionText, memoryText);
         List<ToolDef> defs = mode == Mode.PLAN ? registry.readOnlyDefinitions() : registry.definitions();
 
         int unknownRun = 0;
@@ -194,6 +206,7 @@ public final class Agent {
             // 自然完成：无工具调用的纯文本即最终答复（F2-1）
             if (once.calls().isEmpty()) {
                 conv.addAssistantMessage(ensureFinal(out, cancel, once.text()));
+                maybeUpdateMemory(conv);
                 return;
             }
 
@@ -635,5 +648,52 @@ public final class Agent {
 
     private static String abbr(String s) {
         return s.length() <= 80 ? s : s.substring(0, 80) + "…";
+    }
+
+    // ─── ch09 记忆更新触发（F35~F42）───
+
+    /**
+     * 自然回合结束后触发：每 5 轮或命中记忆信号关键词时，异步发起一次记忆更新（不阻塞主会话）。
+     * 仅当注入了 memMgr 且能取到「最后一条 user 到末尾」的最近消息时才触发。
+     */
+    private void maybeUpdateMemory(ConversationManager conv) {
+        if (memMgr == null) {
+            return;
+        }
+        runtime.bumpTurnCount();
+        List<Message> recent = lastUserTurn(conv.getMessages());
+        if (recent.isEmpty()) {
+            return;
+        }
+        if (runtime.getTurnCount() % 5 == 0 || hasMemorySignal(recent)) {
+            memMgr.updateAsync(recent);
+        }
+    }
+
+    /** 从末尾往回找最后一条 user 消息，返回其到末尾的子列表。 */
+    private static List<Message> lastUserTurn(List<Message> msgs) {
+        for (int i = msgs.size() - 1; i >= 0; i--) {
+            if (msgs.get(i).getRole() == Message.Role.USER) {
+                return new ArrayList<>(msgs.subList(i, msgs.size()));
+            }
+        }
+        return List.of();
+    }
+
+    /** 记忆信号关键词（大小写不敏感）。 */
+    private static boolean hasMemorySignal(List<Message> msgs) {
+        for (Message m : msgs) {
+            String c = m.getContent();
+            if (c == null || c.isEmpty()) {
+                continue;
+            }
+            String low = c.toLowerCase();
+            for (String kw : List.of("记住", "记忆", "别忘", "remember", "memo")) {
+                if (low.contains(kw.toLowerCase())) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 }

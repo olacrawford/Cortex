@@ -8,22 +8,29 @@ import com.cortex.compact.state.SessionContext;
 import com.cortex.config.AppConfig;
 import com.cortex.config.ConfigException;
 import com.cortex.config.ConfigLoader;
+import com.cortex.instructions.Loader;
 import com.cortex.mcp.McpConfig;
 import com.cortex.mcp.McpConfigLoader;
 import com.cortex.mcp.McpManager;
+import com.cortex.memory.Manager;
 import com.cortex.permission.PermissionEngine;
 import com.cortex.prompt.Prompt;
+import com.cortex.session.SessionCleaner;
+import com.cortex.session.Writer;
 import com.cortex.tool.Tool;
 import com.cortex.tool.ToolRegistry;
 import com.cortex.tui.CortexModel;
 import com.cortex.tui.tea.Program;
 
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
  * Cortex 入口：加载配置，构造工具注册中心（内置 + MCP）、权限引擎，启动 TUI。
+ * ch09：加载项目指令（MEWCODE.md）、初始化记忆管理器、后台清理过期会话、
+ * 用 session Writer 挂接对话 JSONL 回调，并把指令 / 记忆文本注入系统提示。
  */
 public class Cortex {
 
@@ -33,6 +40,12 @@ public class Cortex {
             Path root = Path.of("").toAbsolutePath();
             AppConfig config = ConfigLoader.load(configPath);
             ToolRegistry registry = ToolRegistry.createDefault();
+
+            // ch09：项目指令（三层 MEWCODE.md）与记忆索引，注入系统提示
+            Loader loader = new Loader(root);
+            String instructionText = loader.load();
+            Manager memMgr = new Manager(root, Path.of(System.getProperty("user.home")), null, "");
+            String memoryText = memMgr.loadIndex();
 
             // MCP 自动发现（F9）：进 TUI 前同步完成连接 + 握手 + 列工具；失败 server 仅跳过
             McpConfig mcpCfg = McpConfigLoader.loadConfig(root);
@@ -57,7 +70,14 @@ public class Cortex {
             SessionRuntime runtime = new SessionRuntime(
                     new ContentReplacementState(), new Recovery.RecoveryState(),
                     new AutoCompactTrackingState(), session, 0);
-            CortexModel model = new CortexModel(config.getProviders(), registry, engine, runtime);
+            // ch09：JSONL 会话存档 Writer
+            Writer writer = Writer.create(session.sessionDir());
+            // ch09：后台清理过期会话（不阻塞启动）
+            Thread.ofVirtual().name("session-cleaner").start(() ->
+                    SessionCleaner.cleanExpired(root.resolve(".cortex/sessions"), Duration.ofDays(30)));
+
+            CortexModel model = new CortexModel(config.getProviders(), registry, engine, runtime,
+                    writer, memMgr, instructionText, memoryText, root.resolve(".cortex/sessions"));
             Program program = new Program(model);
             model.attach(program);
             program.run();

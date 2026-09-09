@@ -26,13 +26,14 @@ public final class Commands {
     }
 
     /** 可用命令提示（固定顺序，便于展示）。 */
-    public static final String AVAILABLE_HINT = "/exit /plan /do /compact";
+    public static final String AVAILABLE_HINT = "/exit /plan /do /compact /resume";
 
     public static final Map<String, CommandHandler> BUILTIN_COMMANDS = Map.of(
             "/exit", Commands::handleExit,
             "/plan", Commands::handlePlan,
             "/do", Commands::handleDo,
-            "/compact", Commands::handleCompact);
+            "/compact", Commands::handleCompact,
+            "/resume", Commands::handleResume);
 
     /** 检查输入是否以 "/" 开头；命中返回对应命令处理器，未注册返回未知命令 handler。 */
     public static Optional<CommandHandler> dispatchCommand(String input) {
@@ -56,6 +57,11 @@ public final class Commands {
 
     static UpdateResult<? extends Model> handleDo(CortexModel app) {
         return app.commandDo();
+    }
+
+    /** /resume：进入会话列表恢复流程（仅空闲态可用）。 */
+    static UpdateResult<? extends Model> handleResume(CortexModel app) {
+        return app.commandResume();
     }
 
     /** /compact：虚拟线程调 runForceCompact，完成后回投 UI 渲染系统消息。命令不写入对话历史。 */
