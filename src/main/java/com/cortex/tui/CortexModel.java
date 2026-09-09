@@ -51,6 +51,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.Optional;
 import java.util.concurrent.BlockingQueue;
@@ -102,6 +103,9 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
     /** allowed_tools 过滤器：inline 模式仅记录不生效（phase-10 Plan 决议，安全由权限引擎兜底）。 */
     private volatile java.util.function.Predicate<String> toolFilter;
 
+    // Hook 系统（阶段11）：可空 = 未装配
+    private final com.cortex.hook.HookEngine hookEngine;
+
     private AppState state = AppState.CHAT;
     private int width = 80;
 
@@ -139,20 +143,28 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
 
     public CortexModel(List<ProviderConfig> providers, ToolRegistry registry, PermissionEngine engine,
                        SessionRuntime runtime) {
-        this(providers, registry, engine, runtime, null, null, "", "", Path.of("").toAbsolutePath(), null);
+        this(providers, registry, engine, runtime, null, null, "", "", Path.of("").toAbsolutePath(), null, null);
     }
 
     public CortexModel(List<ProviderConfig> providers, ToolRegistry registry, PermissionEngine engine,
                        SessionRuntime runtime, Writer writer, Manager memMgr,
                        String instructionText, String memoryText, Path sessionsDir) {
         this(providers, registry, engine, runtime, writer, memMgr, instructionText, memoryText,
-                sessionsDir, null);
+                sessionsDir, null, null);
     }
 
     public CortexModel(List<ProviderConfig> providers, ToolRegistry registry, PermissionEngine engine,
                        SessionRuntime runtime, Writer writer, Manager memMgr,
                        String instructionText, String memoryText, Path sessionsDir,
                        SkillCatalog skillCatalog) {
+        this(providers, registry, engine, runtime, writer, memMgr, instructionText, memoryText,
+                sessionsDir, skillCatalog, null);
+    }
+
+    public CortexModel(List<ProviderConfig> providers, ToolRegistry registry, PermissionEngine engine,
+                       SessionRuntime runtime, Writer writer, Manager memMgr,
+                       String instructionText, String memoryText, Path sessionsDir,
+                       SkillCatalog skillCatalog, com.cortex.hook.HookEngine hookEngine) {
         this.providers = providers;
         this.registry = registry;
         this.engine = engine;
@@ -163,6 +175,11 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
         this.memoryText = memoryText == null ? "" : memoryText;
         this.sessionsDir = sessionsDir;
         this.skillCatalog = skillCatalog;
+        this.hookEngine = hookEngine;
+        // 阶段11：hook 引擎挂到 runtime，供 Agent 各 emit 点读取
+        if (hookEngine != null) {
+            runtime.hookEngine = hookEngine;
+        }
         // 阶段9：注册 12 条内置命令；名字/别名冲突在启动期立即抛 IllegalStateException 终止启动（F2/N4）
         Builtins.registerAll(cmdRegistry);
         if (writer != null) {
@@ -440,6 +457,8 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
         }
         // 阶段10：provider 就绪后把技能注册为斜杠命令（F11）
         wireSkillsToAgent();
+        // 阶段11：SessionStart——env 就绪、首条 user 消息之前（F9）
+        dispatchSessionStart();
     }
 
     // ─── 技能系统（阶段10）───
@@ -495,19 +514,66 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
     // ─── 提交一轮对话 ───
     private UpdateResult<? extends Model> submit() {
         String text = input.strip();
-        input = "";
         if (text.isEmpty()) {
             // 空输入与纯空白早返回，不进分发器也不进 LLM（F5）
+            input = "";
             return new UpdateResult<>(this, null);
         }
         Dispatch.Parsed parsed = Dispatch.parse(text);
-        if (!parsed.isSlash()) {
-            conversation.addUserMessage(text);
-            String userLine = Styles.USER_PREFIX.apply("❯ ") + text;
-            committed.add(userLine);
-            return startTurn(userLine);
+        if (parsed.isSlash()) {
+            input = "";
+            return dispatchSlash(text, parsed);
         }
-        return dispatchSlash(text, parsed);
+        // UserPromptSubmit：写入对话历史之前，可拦截（F9/F32）——被拦截则保留输入等用户重新编辑
+        com.cortex.hook.DispatchResult hook = dispatchSessionEvent(
+                com.cortex.hook.Event.USER_PROMPT_SUBMIT,
+                Map.of("prompt", text));
+        if (hook.blocked()) {
+            String line = Styles.ERROR.apply("[hook " + hook.blockingHookName() + "] " + hook.reason());
+            committed.add(line);
+            return new UpdateResult<>(this, Command.println(line));
+        }
+        input = "";
+        conversation.addUserMessage(text);
+        String userLine = Styles.USER_PREFIX.apply("❯ ") + text;
+        committed.add(userLine);
+        return startTurn(userLine);
+    }
+
+    // ─── Hook 会话事件分派（阶段11）───
+
+    /** 构造通用 payload（event/session_id/cwd/mode，F10）并合并特化字段。 */
+    private com.cortex.hook.Payload basePayload(com.cortex.hook.Event event, Map<String, Object> extras) {
+        Map<String, Object> data = new java.util.TreeMap<>();
+        data.put("event", event.wireName());
+        data.put("session_id", runtime.session != null ? runtime.session.sessionId() : "");
+        data.put("cwd", System.getProperty("user.dir"));
+        data.put("mode", mode == null ? "default" : mode.displayName());
+        if (extras != null) {
+            data.putAll(extras);
+        }
+        return new com.cortex.hook.Payload(data);
+    }
+
+    /** tui 侧会话事件分派（SessionStart/End/Resume/UserPromptSubmit）；注入 prompt 入 runtime 队列。 */
+    private com.cortex.hook.DispatchResult dispatchSessionEvent(com.cortex.hook.Event event,
+                                                                Map<String, Object> extras) {
+        if (hookEngine == null) {
+            return com.cortex.hook.DispatchResult.empty();
+        }
+        com.cortex.hook.DispatchResult result = hookEngine.dispatch(event, basePayload(event, extras));
+        runtime.appendReminders(result.injectedPrompts());
+        return result;
+    }
+
+    /** SessionStart：进入会话（启动 / /clear 之后）调用（F9）。 */
+    private void dispatchSessionStart() {
+        dispatchSessionEvent(com.cortex.hook.Event.SESSION_START, null);
+    }
+
+    /** SessionEnd：/clear、/resume 切换、/exit 之前调用（F9）。 */
+    private void dispatchSessionEnd() {
+        dispatchSessionEvent(com.cortex.hook.Event.SESSION_END, null);
     }
 
     /**
@@ -954,6 +1020,39 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
     }
 
     @Override
+    public void quit() {
+        // SessionEnd：进程退出前（F9）
+        dispatchSessionEnd();
+        cmdOutputs.add(Command.quit());
+    }
+
+    @Override
+    public List<String> hookLines() {
+        if (hookEngine == null || hookEngine.rules().isEmpty()) {
+            return List.of();
+        }
+        // 按 event 分组（保留 yaml 声明顺序）：`  <name>  <event>  <action.type>  <flags>`（F34）
+        Map<com.cortex.hook.Event, List<com.cortex.hook.HookRule>> grouped = new java.util.LinkedHashMap<>();
+        for (com.cortex.hook.HookRule rule : hookEngine.rules()) {
+            grouped.computeIfAbsent(rule.event(), e -> new ArrayList<>()).add(rule);
+        }
+        List<String> lines = new ArrayList<>();
+        for (Map.Entry<com.cortex.hook.Event, List<com.cortex.hook.HookRule>> e : grouped.entrySet()) {
+            lines.add(e.getKey().wireName() + ":");
+            for (com.cortex.hook.HookRule rule : e.getValue()) {
+                String flags = (rule.onlyOnce() ? " [once]" : "") + (rule.async() ? " [async]" : "");
+                lines.add("  " + rule.name() + "  " + rule.action().typeName() + flags);
+            }
+        }
+        return lines;
+    }
+
+    @Override
+    public List<String> hookSources() {
+        return hookEngine == null ? List.of() : hookEngine.sources();
+    }
+
+    @Override
     public void setMode(com.cortex.permission.Mode m) {
         this.mode = m;
     }
@@ -1036,11 +1135,6 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
         return runtime.session != null ? runtime.session.sessionId() : "";
     }
 
-    @Override
-    public void quit() {
-        cmdOutputs.add(Command.quit());
-    }
-
     /** /compact：虚拟线程调 runForceCompact，完成后回投 UI 渲染系统消息。命令不写入对话历史。 */
     @Override
     public void forceCompact() {
@@ -1077,6 +1171,8 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
     /** /clear：关旧 writer → 开新会话存档 → 重建 conversation 挂新 writer → 重置 runtime 压缩态与累计计数（F17）。 */
     @Override
     public void clearAndNewSession() {
+        // SessionEnd：关闭旧会话之前（F9）
+        dispatchSessionEnd();
         try {
             if (writer != null) {
                 writer.close();
@@ -1094,6 +1190,8 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
             activeSkillNames.clear();
             committed.clear();
             println("已结束当前会话,开启新会话 " + newSesCtx.sessionId());
+            // SessionStart：/clear 新建会话之后（F9）
+            dispatchSessionStart();
         } catch (IOException e) {
             error("开启新会话失败: " + e.getMessage());
         }
@@ -1194,6 +1292,8 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
     }
 
     private UpdateResult<? extends Model> doResumeSession(SessionInfo info) {
+        // SessionEnd：切换离开旧会话之前（F9）
+        dispatchSessionEnd();
         try {
             List<com.cortex.conversation.Message> loaded = SessionLoader.load(info.dir());
             // token 超限时先压缩一次
@@ -1226,6 +1326,8 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
             this.state = AppState.CHAT;
             String msg = "已恢复会话 " + info.id() + "，共 " + loaded.size() + " 条消息";
             committed.add(Styles.MUTED.apply("⊕ " + msg));
+            // SessionResume：恢复完成、首条 user 消息之前（F9）
+            dispatchSessionEvent(com.cortex.hook.Event.SESSION_RESUME, null);
             return new UpdateResult<>(this, Command.println(Styles.MUTED.apply("⊕ " + msg)));
         } catch (Exception e) {
             this.state = AppState.CHAT;

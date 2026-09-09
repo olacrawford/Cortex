@@ -8,6 +8,7 @@ import java.io.StringReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Optional;
 import java.util.List;
 import java.util.Map;
 
@@ -60,17 +61,30 @@ public record Settings(String defaultMode, List<String> allow, List<String> deny
         return List.copyOf(result);
     }
 
-    /** 把规则串列表解析为规则集；非法条目跳过（N5）。 */
+    /**
+     * 把规则串列表解析为规则集；解析失败的条目 stderr 打印「规则原文 + 原因」后跳过，
+     * 其余规则正常加载（阶段11 F4：不再静默丢弃）。
+     */
     public static RuleSet toRuleSet(Settings s) {
         List<Rule> allow = new ArrayList<>();
         List<Rule> deny = new ArrayList<>();
         for (String text : s.allow()) {
-            Rule.parse(text, true).ifPresent(allow::add);
+            parseOrWarn(text, true).ifPresent(allow::add);
         }
         for (String text : s.deny()) {
-            Rule.parse(text, false).ifPresent(deny::add);
+            parseOrWarn(text, false).ifPresent(deny::add);
         }
         return new RuleSet(allow, deny);
+    }
+
+    /** 解析单条规则；失败向 stderr 打印 `rule "<原文>" parse failed: <原因>` 并返回 empty。 */
+    private static Optional<Rule> parseOrWarn(String text, boolean allow) {
+        try {
+            return Optional.of(Rule.parse(text, allow));
+        } catch (Rule.RuleParseException e) {
+            System.err.printf("rule \"%s\" parse failed: %s%n", text, e.getMessage());
+            return Optional.empty();
+        }
     }
 
     /** 内部工具名 → 面向用户的友好名；未知原样返回（F3/AC4）。 */

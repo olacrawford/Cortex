@@ -19,6 +19,7 @@ class BuiltinsTest {
         final List<String> injected = new ArrayList<>();
         boolean cleared;
         boolean quit;
+        List<String> hookLineList = List.of();
 
         @Override
         public void println(String msg) {
@@ -111,6 +112,16 @@ class BuiltinsTest {
         }
 
         @Override
+        public List<String> hookLines() {
+            return hookLineList;
+        }
+
+        @Override
+        public List<String> hookSources() {
+            return List.of();
+        }
+
+        @Override
         public boolean idle() {
             return true;
         }
@@ -122,16 +133,16 @@ class BuiltinsTest {
         return reg;
     }
 
-    private static final List<String> ALL_13 = List.of(
-            "clear", "compact", "do", "exit", "help", "memory",
+    private static final List<String> ALL_14 = List.of(
+            "clear", "compact", "do", "exit", "help", "hooks", "memory",
             "permission", "plan", "resume", "review", "session", "skills", "status");
 
     @Test
-    void registerAll_allRegistered_恰好13条全小写() {
+    void registerAll_allRegistered_恰好14条全小写() {
         CommandRegistry reg = newRegistry();
-        assertEquals(13, reg.visible().size());
+        assertEquals(14, reg.visible().size());
         List<String> names = reg.visible().stream().map(Command::name).toList();
-        assertEquals(ALL_13, names);
+        assertEquals(ALL_14, names);
         for (String n : names) {
             assertEquals(n, n.toLowerCase(), "命令名必须全小写");
         }
@@ -153,6 +164,22 @@ class BuiltinsTest {
             assertDoesNotThrow(() -> c.handler().handle(Ui.NopUi.INSTANCE),
                     "handler 在 NopUi 上应可安全执行: " + c.name());
         }
+    }
+
+    @Test
+    void handleHooks_空时NoHooksLoaded_有规则列出() throws Exception {
+        CommandRegistry reg = newRegistry();
+        RecordingUi empty = new RecordingUi();
+        reg.lookup("hooks").orElseThrow().handler().handle(empty);
+        assertEquals("No hooks loaded.", empty.prints.get(0));
+
+        RecordingUi ui = new RecordingUi();
+        ui.hookLineList = List.of("PreToolUse:", "  block-write  shell [once]");
+        reg.lookup("hooks").orElseThrow().handler().handle(ui);
+        String out = ui.prints.get(ui.prints.size() - 1);
+        assertTrue(out.contains("PreToolUse:"));
+        assertTrue(out.contains("block-write  shell [once]"));
+        assertTrue(out.contains("Loaded from:"));
     }
 
     @Test
@@ -193,12 +220,12 @@ class BuiltinsTest {
     }
 
     @Test
-    void handleHelp_printsAllThirteen_两列对齐() throws Exception {
+    void handleHelp_printsAllFourteen_两列对齐() throws Exception {
         CommandRegistry reg = newRegistry();
         RecordingUi ui = new RecordingUi();
         reg.lookup("help").orElseThrow().handler().handle(ui);
         assertEquals(1, ui.prints.size());
-        for (String n : ALL_13) {
+        for (String n : ALL_14) {
             assertTrue(ui.prints.get(0).contains("/" + n), "缺命令: " + n);
         }
     }

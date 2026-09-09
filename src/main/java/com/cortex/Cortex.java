@@ -74,6 +74,9 @@ public class Cortex {
                 skillCatalog.remove(bad);
             }
 
+            // ch11：Hook 引擎（hooks.yaml 双层加载，加载错误只 stderr 不阻断启动）
+            com.cortex.hook.HookEngine hookEngine = com.cortex.hook.HookLoader.load(root);
+
             PermissionEngine engine = PermissionEngine.create(root);
             // ch08：会话级上下文管理状态（决策账本 / 文件追踪 / 熔断计数 / 会话目录），跨 run 持有
             SessionContext session = SessionContext.create(root);
@@ -88,7 +91,7 @@ public class Cortex {
 
             CortexModel model = new CortexModel(config.getProviders(), registry, engine, runtime,
                     writer, memMgr, instructionText, memoryText, root.resolve(".cortex/sessions"),
-                    skillCatalog);
+                    skillCatalog, hookEngine);
             // ch10：远程安装工具 → 装完 reload catalog 并重新注册斜杠命令，无需重启
             registry.register(new InstallSkillTool(skillCatalog, root,
                     Path.of(System.getProperty("user.home"), ".cortex", "skills"),
@@ -96,6 +99,15 @@ public class Cortex {
             Program program = new Program(model);
             model.attach(program);
             program.run();
+            // ch11：SessionEnd 兜底（ctrl+c 等任意退出路径都 emit；F9/T22）
+            if (hookEngine != null) {
+                hookEngine.dispatch(com.cortex.hook.Event.SESSION_END,
+                        new com.cortex.hook.Payload(new java.util.TreeMap<>(Map.of(
+                                "event", com.cortex.hook.Event.SESSION_END.wireName(),
+                                "session_id", runtime.session != null ? runtime.session.sessionId() : "",
+                                "cwd", root.toString(),
+                                "mode", "default"))));
+            }
         } catch (ConfigException e) {
             System.err.println("配置错误: " + e.getMessage());
             System.exit(1);

@@ -86,4 +86,24 @@ public final class BuiltinLocal {
             ui.println(sb.toString());
         };
     }
+
+    /** /hooks：按 event 分组列出已加载 hook 与加载来源（阶段11 F34/F35）。 */
+    public static Command.Handler hooks() {
+        return ui -> {
+            List<String> lines = ui.hookLines();
+            if (lines.isEmpty()) {
+                ui.println("No hooks loaded.");
+                return;
+            }
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < lines.size(); i++) {
+                sb.append(lines.get(i));
+                if (i < lines.size() - 1) {
+                    sb.append("\n");
+                }
+            }
+            sb.append("\n\nLoaded from: ").append(String.join(", ", ui.hookSources()));
+            ui.println(sb.toString());
+        };
+    }
 }

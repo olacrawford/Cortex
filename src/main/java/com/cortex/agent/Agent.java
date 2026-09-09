@@ -5,6 +5,9 @@ import com.cortex.compact.ContextCompactor;
 import com.cortex.compact.Token;
 import com.cortex.conversation.ConversationManager;
 import com.cortex.conversation.Message;
+import com.cortex.hook.DispatchResult;
+import com.cortex.hook.Event;
+import com.cortex.hook.Payload;
 import com.cortex.llm.LlmClient;
 import com.cortex.llm.PromptTooLongException;
 import com.cortex.llm.Request;
@@ -113,7 +116,7 @@ public final class Agent {
                 loop(conv, mode, cancel, out);
             } catch (Exception e) {
                 // 未预期异常：发 Failed（正常路径已发过的会由 TUI 幂等处理）
-                putDirect(out, new AgentEvent.Failed(e.getMessage() != null ? e.getMessage() : e.toString()));
+                emitFailed(mode, cancel, out, e.getMessage() != null ? e.getMessage() : e.toString());
             } finally {
                 runLock.unlock();
                 // 终止哨兵：绕过 emit 的取消检查，保证 TUI 总能收到结束信号回空闲态
@@ -121,6 +124,54 @@ public final class Agent {
             }
         });
         return out;
+    }
+
+    // ─── Hook 分派（阶段11 F31）───
+
+    /**
+     * 事件分派 + 注入 prompt 入队：11 个 emit 点的统一入口。
+     * hookEngine 未装配时零开销返回 empty；注入的 prompt 进 runtime reminder 队列，
+     * 下一次 streamOnce 拼进 reminder 串（F33/N4）。
+     */
+    private DispatchResult dispatchHook(Event event, Mode mode, CancelToken cancel,
+                                        Map<String, Object> extras) {
+        com.cortex.hook.HookEngine engine = runtime.hookEngine;
+        if (engine == null) {
+            return DispatchResult.empty();
+        }
+        Map<String, Object> data = new java.util.TreeMap<>();
+        data.put("event", event.wireName());
+        data.put("session_id", runtime.session != null ? runtime.session.sessionId() : "");
+        data.put("cwd", System.getProperty("user.dir"));
+        data.put("mode", mode == null ? "default" : mode.displayName());
+        if (extras != null) {
+            data.putAll(extras);
+        }
+        DispatchResult result = engine.dispatch(event, new Payload(data), cancel);
+        runtime.appendReminders(result.injectedPrompts());
+        return result;
+    }
+
+    /** 工具参数 JSON → Map（PreToolUse/PostToolUse payload 的 tool_input 字段）；解析失败为空 Map。 */
+    private Map<String, Object> toolInputMap(ToolCall call) {
+        try {
+            return MAPPER.readValue(call.args() == null || call.args().isBlank() ? "{}" : call.args(),
+                    new TypeReference<Map<String, Object>>() {});
+        } catch (Exception e) {
+            return Map.of();
+        }
+    }
+
+    /** PreToolUse 拦截时的回灌结果：content=[hook <name>] <reason>、isError=true（F32）。 */
+    private String hookBlockedText(String hookName, String reason) {
+        return "[hook " + hookName + "] " + reason;
+    }
+
+    /** Failed 事件统一出口：先发 NOTIFICATION（kind=stream_error）再发 Failed（F9）。 */
+    private void emitFailed(Mode mode, CancelToken cancel, BlockingQueue<AgentEvent> out, String message) {
+        dispatchHook(Event.NOTIFICATION, mode, cancel,
+                Map.of("kind", "stream_error", "detail", message == null ? "" : message));
+        emit(out, cancel, new AgentEvent.Failed(message));
     }
 
     /** 手动 /compact 专用：等主循环空闲后执行一次 forceCompact，返回前后 token。 */
@@ -134,8 +185,14 @@ public final class Agent {
             ContextCompactor.Input in = new ContextCompactor.Input(conv, client, cw, defs,
                     runtime.replacement, runtime.recovery, runtime.autoTracking, runtime.session,
                     anchor, anchorLen, est, ContextCompactor.TriggerKind.MANUAL);
+            // PreCompact：trigger=manual（F9，手动路径合并接入）
+            dispatchHook(Event.PRE_COMPACT, null, null, Map.of("trigger", "manual"));
             try {
                 ContextCompactor.CompactMsg msg = ContextCompactor.manage(in);
+                dispatchHook(Event.POST_COMPACT, null, null, Map.of(
+                        "trigger", "manual",
+                        "before_tokens", msg.beforeTokens(),
+                        "after_tokens", msg.afterTokens()));
                 return new ForceCompactResult(msg.beforeTokens(), msg.afterTokens(), null);
             } catch (com.cortex.compact.CompactException e) {
                 return new ForceCompactResult(0, 0, e);
@@ -173,20 +230,20 @@ public final class Agent {
             StreamOutcome once;
             boolean emergencyRetried = false;
             try {
-                once = roundRequest(conv, sys, envText, defs, reminder, cancel, out);
+                once = roundRequest(conv, sys, envText, defs, reminder, mode, cancel, out);
             } catch (com.cortex.compact.CompactException ce) {
-                emit(out, cancel, new AgentEvent.Failed(ce.getMessage()));
+                emitFailed(mode, cancel, out, ce.getMessage());
                 ensureAssistantTail(conv, NOTICE_STREAM_ERR);
                 return;
             } catch (StreamException se) {
                 if (se.getCause() instanceof PromptTooLongException && !emergencyRetried) {
-                    once = emergencyCompact(conv, sys, envText, defs, reminder, cancel, out, se);
+                    once = emergencyCompact(conv, sys, envText, defs, reminder, mode, cancel, out, se);
                     if (once == null) {
                         return;
                     }
                     emergencyRetried = true;
                 } else {
-                    emit(out, cancel, new AgentEvent.Failed(se.getMessage()));
+                    emitFailed(mode, cancel, out, se.getMessage());
                     ensureAssistantTail(conv, NOTICE_STREAM_ERR);
                     return;
                 }
@@ -207,6 +264,8 @@ public final class Agent {
             if (once.calls().isEmpty()) {
                 conv.addAssistantMessage(ensureFinal(out, cancel, once.text()));
                 maybeUpdateMemory(conv);
+                // Stop 事件：自然停止后、Done emit 之前；取消与出错路径不触发（F9）
+                dispatchHook(Event.STOP, mode, cancel, Map.of("iter", iter));
                 return;
             }
 
@@ -237,10 +296,12 @@ public final class Agent {
      * 重置锚点并重估，能塞下则重试一次 streamOnce，否则上抛。
      */
     private StreamOutcome emergencyCompact(ConversationManager conv, String sys, String envText,
-                                           List<ToolDef> defs, String reminder, CancelToken cancel,
-                                           BlockingQueue<AgentEvent> out, StreamException firstErr)
+                                           List<ToolDef> defs, String reminder, Mode mode,
+                                           CancelToken cancel, BlockingQueue<AgentEvent> out, StreamException firstErr)
             throws InterruptedException {
         emit(out, cancel, new CompactEvent(CompactPhase.BEFORE_EMERGENCY, 0, 0, null));
+        // PreCompact：trigger=emergency（F9）
+        dispatchHook(Event.PRE_COMPACT, mode, cancel, Map.of("trigger", "emergency"));
         ContextCompactor.CompactMsg msg;
         try {
             long anchor = runtime.getUsageAnchor();
@@ -253,7 +314,7 @@ public final class Agent {
             msg = ContextCompactor.manage(in);
         } catch (com.cortex.compact.CompactException ce) {
             emit(out, cancel, new CompactEvent(CompactPhase.AFTER_EMERGENCY, 0, 0, ce));
-            emit(out, cancel, new AgentEvent.Failed(ce.getMessage()));
+            emitFailed(mode, cancel, out, ce.getMessage());
             ensureAssistantTail(conv, NOTICE_STREAM_ERR);
             return null;
         }
@@ -261,19 +322,23 @@ public final class Agent {
         long est2 = Token.estimateTokens(0L, conv.getMessages(), 0);
         emit(out, cancel, new CompactEvent(CompactPhase.AFTER_EMERGENCY,
                 msg.beforeTokens(), msg.afterTokens(), null));
+        dispatchHook(Event.POST_COMPACT, mode, cancel, Map.of(
+                "trigger", "emergency",
+                "before_tokens", msg.beforeTokens(),
+                "after_tokens", msg.afterTokens()));
         if (est2 >= runtime.contextWindow - CompactConstants.MANUAL_SAFETY_MARGIN) {
-            emit(out, cancel, new AgentEvent.Failed(firstErr.getMessage()));
+            emitFailed(mode, cancel, out, firstErr.getMessage());
             ensureAssistantTail(conv, NOTICE_STREAM_ERR);
             return null;
         }
         try {
-            return roundRequest(conv, sys, envText, defs, reminder, cancel, out);
+            return roundRequest(conv, sys, envText, defs, reminder, mode, cancel, out);
         } catch (com.cortex.compact.CompactException ce) {
-            emit(out, cancel, new AgentEvent.Failed(ce.getMessage()));
+            emitFailed(null, cancel, out, ce.getMessage());
             ensureAssistantTail(conv, NOTICE_STREAM_ERR);
             return null;
         } catch (StreamException se) {
-            emit(out, cancel, new AgentEvent.Failed(se.getMessage()));
+            emitFailed(mode, cancel, out, se.getMessage());
             ensureAssistantTail(conv, NOTICE_STREAM_ERR);
             return null;
         }
@@ -281,8 +346,8 @@ public final class Agent {
 
     /** 每轮请求前：manageContext(AUTO) + streamOnce + 更新 usage 锚点。 */
     private StreamOutcome roundRequest(ConversationManager conv, String sys, String envText,
-                                       List<ToolDef> defs, String reminder, CancelToken cancel,
-                                       BlockingQueue<AgentEvent> out)
+                                       List<ToolDef> defs, String reminder, Mode mode,
+                                       CancelToken cancel, BlockingQueue<AgentEvent> out)
             throws InterruptedException, com.cortex.compact.CompactException, StreamException {
         long anchor = runtime.getUsageAnchor();
         int anchorLen = runtime.getAnchorMsgLen();
@@ -292,6 +357,8 @@ public final class Agent {
                 && est >= cw - CompactConstants.SUMMARY_RESERVE - CompactConstants.AUTO_SAFETY_MARGIN;
         if (willSummarize) {
             emit(out, cancel, new CompactEvent(CompactPhase.BEFORE_AUTO, 0, 0, null));
+            // PreCompact：manage 调用之前，trigger=auto（F9）
+            dispatchHook(Event.PRE_COMPACT, mode, cancel, Map.of("trigger", "auto"));
         }
         ContextCompactor.Input in = new ContextCompactor.Input(conv, client, cw, defs,
                 runtime.replacement, runtime.recovery, runtime.autoTracking, runtime.session,
@@ -308,12 +375,28 @@ public final class Agent {
         if (willSummarize) {
             emit(out, cancel, new CompactEvent(CompactPhase.AFTER_AUTO,
                     msg.beforeTokens(), msg.afterTokens(), null));
+            // PostCompact：manage 返回后，带前后 token（F9）
+            dispatchHook(Event.POST_COMPACT, mode, cancel, Map.of(
+                    "trigger", "auto",
+                    "before_tokens", msg.beforeTokens(),
+                    "after_tokens", msg.afterTokens()));
         }
-        StreamOutcome once = streamOnce(conv, sys, envText, defs, reminder, cancel, out);
+        StreamOutcome once = streamOnce(conv, sys, envText, defs, reminder, mode, cancel, out);
         if (once.usage() != null) {
             runtime.updateAnchor(Token.usageAnchor(once.usage()), conv.size());
         }
         return once;
+    }
+
+    /** conversation 末尾的 user 消息内容（PreUserMessage payload 用）；无则空串。 */
+    private static String lastUserPrompt(ConversationManager conv) {
+        List<Message> msgs = conv.getMessages();
+        for (int i = msgs.size() - 1; i >= 0; i--) {
+            if (msgs.get(i).getRole() == Message.Role.USER) {
+                return msgs.get(i).getContent();
+            }
+        }
+        return "";
     }
 
     // ─── 流式收集（双路）───
@@ -322,13 +405,21 @@ public final class Agent {
 
     /** 一次流式请求：组装 Request（系统两段 + 本轮 reminder）、转发文本、收集完整调用与用量，直到流结束。 */
     private StreamOutcome streamOnce(ConversationManager conv, String sys, String envText,
-                                     List<ToolDef> defs, String reminder,
+                                     List<ToolDef> defs, String reminder, Mode mode,
                                      CancelToken cancel, BlockingQueue<AgentEvent> out)
             throws InterruptedException, StreamException {
         StringBuilder text = new StringBuilder();
         List<ToolCall> calls = new ArrayList<>();
         com.cortex.llm.Usage usage = null;
-        Request req = new Request(conv.getMessages(), defs, new SystemPrompt(sys, envText), reminder);
+        // PreUserMessage：provider.stream 之前，payload 带本轮末尾 user 消息（F9）
+        dispatchHook(Event.PRE_USER_MESSAGE, null, cancel,
+                Map.of("prompt", lastUserPrompt(conv)));
+        // hook prompt 注入与 plan reminder 同轮拼接：hook 注入置于 plan reminder 之后（F20/F33）
+        List<String> hookReminders = runtime.takeReminders();
+        String fullReminder = hookReminders.isEmpty() ? reminder
+                : (reminder.isEmpty() ? String.join("\n\n", hookReminders)
+                        : reminder + "\n\n" + String.join("\n\n", hookReminders));
+        Request req = new Request(conv.getMessages(), defs, new SystemPrompt(sys, envText), fullReminder);
         BlockingQueue<StreamEvent> queue = client.stream(req);
         while (true) {
             if (cancel.isCancelled()) {
@@ -356,7 +447,7 @@ public final class Agent {
                         // 上下文过长：抛给主循环走紧急压缩（已累加文本不写回 Conversation）
                         throw new StreamException(p);
                     }
-                    emit(out, cancel, new AgentEvent.Failed(e.message()));
+                    emitFailed(mode, cancel, out, e.message());
                     return new StreamOutcome(text.toString(), calls, usage, true);
                 }
                 case StreamEvent.ThinkingDelta ignored -> {
@@ -453,10 +544,23 @@ public final class Agent {
         while (to < calls.size() && registry.isReadOnly(calls.get(to).name())) {
             to++;
         }
+        // PreToolUse：每条只读调用准备执行之前，可拦截（F9/F32）
+        boolean[] hookBlocked = new boolean[to - from];
+        String[] hookText = new String[to - from];
+        for (int k = from; k < to; k++) {
+            DispatchResult pre = dispatchHook(Event.PRE_TOOL_USE, mode, cancel,
+                    Map.of("tool_name", calls.get(k).name(), "tool_input", toolInputMap(calls.get(k))));
+            if (pre.blocked()) {
+                hookBlocked[k - from] = true;
+                hookText[k - from] = hookBlockedText(pre.blockingHookName(), pre.reason());
+            }
+        }
         // 前四层判定（黑名单/沙箱/规则/模式兜底；只读兜底恒 Allow）
         PermissionEngine.CheckResult[] checks = new PermissionEngine.CheckResult[to - from];
         for (int k = from; k < to; k++) {
-            checks[k - from] = engine.check(mode, calls.get(k), true);
+            checks[k - from] = hookBlocked[k - from]
+                    ? null // 被 hook 拦截：跳过权限引擎
+                    : engine.check(mode, calls.get(k), true);
         }
         // Start 事件按调用序先发（动态区同时列出多个在执行的工具行）
         for (int k = from; k < to; k++) {
@@ -464,7 +568,7 @@ public final class Agent {
         }
         List<Future<Result>> futures = new ArrayList<>();
         for (int k = from; k < to; k++) {
-            if (checks[k - from].decision() == Decision.DENY) {
+            if (hookBlocked[k - from] || checks[k - from].decision() == Decision.DENY) {
                 futures.add(null); // 被拒项不执行
                 continue;
             }
@@ -475,7 +579,9 @@ public final class Agent {
         for (int k = from; k < to; k++) {
             PermissionEngine.CheckResult cr = checks[k - from];
             Result r;
-            if (cr.decision() == Decision.DENY) {
+            if (hookBlocked[k - from]) {
+                r = Result.error(hookText[k - from]);
+            } else if (cr.decision() == Decision.DENY) {
                 r = Result.error(cr.reason());
             } else if (cancel.isCancelled()) {
                 futures.get(k - from).cancel(true);
@@ -484,6 +590,10 @@ public final class Agent {
                 r = await(futures.get(k - from), cancel);
             }
             results[k] = new ToolResult(calls.get(k).id(), r.content(), r.isError());
+            // PostToolUse：拿到 result 之后、PhaseEnd emit 之前（F9；被 Deny/拦截的也触发）
+            dispatchHook(Event.POST_TOOL_USE, mode, cancel, Map.of(
+                    "tool_name", calls.get(k).name(), "tool_input", toolInputMap(calls.get(k)),
+                    "tool_result", abbreviateHookResult(r.content()), "is_error", r.isError()));
             emit(out, cancel, toolEvent(calls.get(k), Phase.END, r.content(), r.isError()));
         }
         return to;
@@ -494,6 +604,20 @@ public final class Agent {
                               CancelToken cancel, BlockingQueue<AgentEvent> out, ToolResult[] results)
             throws InterruptedException {
         ToolCall call = calls.get(i);
+        // PreToolUse：权限引擎 check 之前，可拦截（F9/F32）——被拦截则跳过权限与真实执行
+        DispatchResult pre = dispatchHook(Event.PRE_TOOL_USE, mode, cancel,
+                Map.of("tool_name", call.name(), "tool_input", toolInputMap(call)));
+        if (pre.blocked()) {
+            String text = hookBlockedText(pre.blockingHookName(), pre.reason());
+            emit(out, cancel, toolEvent(call, Phase.START, "", false));
+            results[i] = new ToolResult(call.id(), text, true);
+            // PostToolUse：被拦截同样触发，is_error=true（F9）
+            dispatchHook(Event.POST_TOOL_USE, mode, cancel, Map.of(
+                    "tool_name", call.name(), "tool_input", toolInputMap(call),
+                    "tool_result", text, "is_error", true));
+            emit(out, cancel, toolEvent(call, Phase.END, text, true));
+            return i + 1;
+        }
         PermissionEngine.CheckResult cr = engine.check(mode, call, false);
         Result r = switch (cr.decision()) {
             case DENY -> {
@@ -532,8 +656,20 @@ public final class Agent {
             return -1; // 人在回路等待中被取消
         }
         results[i] = new ToolResult(call.id(), r.content(), r.isError());
+        // PostToolUse：拿到 result 之后、PhaseEnd emit 之前（F9）
+        dispatchHook(Event.POST_TOOL_USE, mode, cancel, Map.of(
+                "tool_name", call.name(), "tool_input", toolInputMap(call),
+                "tool_result", abbreviateHookResult(r.content()), "is_error", r.isError()));
         emit(out, cancel, toolEvent(call, Phase.END, r.content(), r.isError()));
         return i + 1;
+    }
+
+    /** PostToolUse payload 的结果摘要上限，避免 payload JSON 过大。 */
+    private static String abbreviateHookResult(String content) {
+        if (content == null) {
+            return "";
+        }
+        return content.length() <= 2000 ? content : content.substring(0, 2000) + "…";
     }
 
     /**
@@ -546,6 +682,9 @@ public final class Agent {
             return null;
         }
         BlockingQueue<Outcome> respond = new ArrayBlockingQueue<>(1);
+        // Notification：权限 Ask 弹出审批时（F9）
+        dispatchHook(Event.NOTIFICATION, null, cancel,
+                Map.of("kind", "approval", "detail", call.name()));
         if (!emit(out, cancel, new AgentEvent.Approval(
                 new ApprovalRequest(call.name(), preview(call.args()), reason, respond)))) {
             return null;

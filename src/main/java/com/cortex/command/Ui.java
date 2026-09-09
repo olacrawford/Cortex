@@ -52,6 +52,12 @@ public interface Ui {
     /** 已安装技能名清单（skillCatalog 未加载时返回空清单，阶段10）。 */
     List<String> skillNames();
 
+    /** 已加载 hook 行（按 event 分组、每条一条），阶段11 /hooks 用。 */
+    List<String> hookLines();
+
+    /** hook 加载来源文件清单。 */
+    List<String> hookSources();
+
     // ─── 影响界面动作 ───
     void quit();
 
@@ -130,6 +136,16 @@ public interface Ui {
 
         @Override
         public List<String> skillNames() {
+            return List.of();
+        }
+
+        @Override
+        public List<String> hookLines() {
+            return List.of();
+        }
+
+        @Override
+        public List<String> hookSources() {
             return List.of();
         }
 
