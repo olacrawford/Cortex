@@ -19,6 +19,8 @@ public final class Builtins {
                 Kind.UI, false, BuiltinUi.exit()));
         reg.register(new Command("help", List.of(), "查看全部可用命令",
                 Kind.LOCAL, false, BuiltinLocal.help(reg)));
+        reg.register(new Command("hooks", List.of(), "列出已加载的 hook",
+                Kind.LOCAL, false, BuiltinLocal.hooks()));
         reg.register(new Command("memory", List.of(), "查看已加载的记忆文件",
                 Kind.LOCAL, false, BuiltinLocal.memory()));
         reg.register(new Command("permission", List.of(), "查看当前权限模式",

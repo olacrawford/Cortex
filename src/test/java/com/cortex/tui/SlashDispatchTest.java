@@ -217,8 +217,8 @@ class SlashDispatchTest {
         String viewAll = stripAnsi(app.view());
         // 12 条候选超过 MAX_ROWS=8：首屏可见前 8 条 + 滚动提示（N5），第 9 条起的 /resume 不可见
         assertTrue(viewAll.contains("/clear"));
-        assertTrue(viewAll.contains("/permission"));
-        assertTrue(viewAll.contains("↓ 7 more"));
+        assertTrue(viewAll.contains("/hooks"));
+        assertTrue(viewAll.contains("↓ 8 more"));
         assertFalse(viewAll.contains("/session"), "超出首屏的候选应被滚动窗口隐藏");
 
         type("s");
@@ -343,5 +343,75 @@ class SlashDispatchTest {
         type("/status");
         String out = pressEnterAndCapture();
         assertTrue(out.contains("Mode:"));
+    }
+
+    // ─── 阶段11：Hook 集成 ───
+
+    @Test
+    void userPromptSubmit被hook拦截时不进对话且输入保留() throws Exception {
+        ProviderConfig p = new ProviderConfig();
+        p.setName("test");
+        p.setProtocol("anthropic");
+        p.setApiKey("sk-test");
+        p.setModel("test-model");
+        p.setBaseUrl("http://127.0.0.1:1");
+        // UserPromptSubmit 拦截：prompt 含 delete（忽略大小写）→ exit 2 拒绝
+        com.cortex.hook.HookEngine blocking = new com.cortex.hook.HookEngine(
+                List.of(new com.cortex.hook.HookRule("warn-delete", com.cortex.hook.Event.USER_PROMPT_SUBMIT,
+                        new com.cortex.hook.Condition(com.cortex.hook.CombineMode.ALL_OF, List.of(
+                                new com.cortex.hook.AtomCondition("prompt",
+                                        com.cortex.permission.Matchers.compile("~(?i)delete", false)))),
+                        new com.cortex.hook.Action.Shell("echo \"prompt contains delete keyword\" >&2; exit 2"),
+                        false, false, java.time.Duration.ofSeconds(5), "test")),
+                List.of(), new com.cortex.hook.HookExecutor());
+        com.cortex.skill.SkillCatalog emptyCatalog = new com.cortex.skill.SkillCatalog();
+        Path emptyUser = java.nio.file.Files.createDirectories(tmp.resolve("user-skills-empty"));
+        emptyCatalog.loadCatalog(tmp, emptyUser);
+        CortexModel hooked = new CortexModel(List.of(p), ToolRegistry.createDefault(),
+                PermissionEngine.create(tmp, System.err), SessionRuntime.empty(200_000),
+                null, null, "", "", tmp.resolve(".cortex/sessions"), emptyCatalog, blocking);
+
+        for (char c : "请帮我 delete 那个文件".toCharArray()) {
+            hooked.update(new KeyPressMessage(String.valueOf(c), new char[]{c}));
+        }
+        UpdateResult<? extends Model> r = hooked.update(new KeyPressMessage("enter", new char[0]));
+        String out = stripAnsi(renderCommands(r.command()));
+        assertTrue(out.contains("[hook warn-delete]"), "拦截提示（F32）");
+        assertTrue(out.contains("prompt contains delete keyword"));
+        assertEquals(0, hooked.conversationForTest().size(), "被拦截消息不进对话历史");
+        // 输入保留：view 中输入框仍是原文本（未消费）
+        assertTrue(stripAnsi(hooked.view()).contains("delete 那个文件"), "输入框内容保留供重新编辑");
+    }
+
+    @Test
+    void sessionStart注入的prompt进入runtime提醒队列() throws Exception {
+        ProviderConfig p = new ProviderConfig();
+        p.setName("test");
+        p.setProtocol("anthropic");
+        p.setApiKey("sk-test");
+        p.setModel("test-model");
+        p.setBaseUrl("http://127.0.0.1:1");
+        com.cortex.skill.SkillCatalog emptyCatalog = new com.cortex.skill.SkillCatalog();
+        Path emptyUser = java.nio.file.Files.createDirectories(tmp.resolve("user-skills-empty2"));
+        emptyCatalog.loadCatalog(tmp, emptyUser);
+        com.cortex.hook.HookEngine promptHook = new com.cortex.hook.HookEngine(
+                List.of(new com.cortex.hook.HookRule("zh-cn", com.cortex.hook.Event.SESSION_START, null,
+                        new com.cortex.hook.Action.Prompt("用 zh-CN 回复"),
+                        false, false, java.time.Duration.ofSeconds(5), "test")),
+                List.of(), new com.cortex.hook.HookExecutor());
+        SessionRuntime runtime = SessionRuntime.empty(200_000);
+        new CortexModel(List.of(p), ToolRegistry.createDefault(),
+                PermissionEngine.create(tmp, System.err), runtime,
+                null, null, "", "", tmp.resolve(".cortex/sessions"), emptyCatalog, promptHook);
+        // activate 在构造时同步调用 dispatchSessionStart → prompt 已入队
+        assertEquals(List.of("用 zh-CN 回复"), runtime.takeReminders(), "SessionStart 注入进 reminder 队列（AC6）");
+        assertTrue(runtime.takeReminders().isEmpty(), "takeReminders 取走后清空（F21）");
+    }
+
+    @Test
+    void hooks命令_无hook时输出NoHooksLoaded() {
+        type("/hooks");
+        String out = pressEnterAndCapture();
+        assertTrue(out.contains("No hooks loaded."));
     }
 }

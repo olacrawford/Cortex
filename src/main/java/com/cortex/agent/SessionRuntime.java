@@ -8,6 +8,7 @@ import com.cortex.compact.state.SessionContext;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
@@ -23,6 +24,11 @@ public final class SessionRuntime {
     public final AutoCompactTrackingState autoTracking;
     public volatile SessionContext session;   // /resume 恢复时替换为新会话
     public volatile int contextWindow;
+    /** Hook 引擎（阶段11，可空 = 未装配 hook）；由 Main 装配后设置。 */
+    public volatile com.cortex.hook.HookEngine hookEngine;
+    /** hook prompt 动作注入的 reminder 队列：仅本轮有效，streamOnce 取走后清空（F20/F21/N4）。 */
+    private final java.util.List<String> pendingReminders =
+            java.util.Collections.synchronizedList(new java.util.ArrayList<>());
 
     private final ReentrantLock anchorLock = new ReentrantLock();
     private long usageAnchor;     // 上一次主对话路径 Stream 真实 usage 之和；摘要请求不更新此字段
@@ -112,6 +118,29 @@ public final class SessionRuntime {
         } finally {
             anchorLock.unlock();
         }
+        pendingReminders.clear();
+        if (hookEngine != null) {
+            hookEngine.resetForNewSession();
+        }
         this.session = newSession;
+    }
+
+    /** 追加 hook 注入的 reminder（F20：按 hook 声明顺序拼接）。 */
+    public void appendReminders(List<String> prompts) {
+        if (prompts != null && !prompts.isEmpty()) {
+            pendingReminders.addAll(prompts);
+        }
+    }
+
+    /** 取走全部 pending reminder 并清空（F21：仅本轮有效）；在组装 LLM 请求 reminder 时调用。 */
+    public List<String> takeReminders() {
+        synchronized (pendingReminders) {
+            if (pendingReminders.isEmpty()) {
+                return List.of();
+            }
+            List<String> taken = List.copyOf(pendingReminders);
+            pendingReminders.clear();
+            return taken;
+        }
     }
 }
