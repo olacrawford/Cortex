@@ -4,7 +4,10 @@ package com.cortex.agent;
  * Agent Loop 对外的事件流；sealed 让 TUI 按变体分派渲染。
  * 以 {@link Done} 作为终止事件（任何结束路径都以 Done 收尾）。
  */
-public sealed interface AgentEvent {
+public sealed interface AgentEvent
+        permits AgentEvent.Text, AgentEvent.Tool, AgentEvent.UsageReport, AgentEvent.Iter,
+                AgentEvent.Notice, AgentEvent.Approval, AgentEvent.Done, AgentEvent.Failed,
+                CompactEvent {
 
     /** 文本增量（preamble 或最终答复）。 */
     record Text(String delta) implements AgentEvent {}

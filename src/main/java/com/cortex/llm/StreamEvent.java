@@ -14,5 +14,10 @@ public sealed interface StreamEvent {
 
     record StreamEnd(String stopReason, int inputTokens, int outputTokens) implements StreamEvent {}
 
-    record Error(String message) implements StreamEvent {}
+    record Error(String message, Throwable cause) implements StreamEvent {
+        /** 一般错误：无 cause。 */
+        public Error(String message) {
+            this(message, null);
+        }
+    }
 }

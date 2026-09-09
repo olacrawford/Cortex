@@ -96,6 +96,7 @@ public class ConfigLoader {
 
         pc.setBaseUrl(getString(map, "base_url"));
         pc.setThinking(getBoolean(map, "thinking"));
+        pc.setContextWindow(getInt(map, "context_window"));
 
         return pc;
     }
@@ -110,5 +111,19 @@ public class ConfigLoader {
         if (v instanceof Boolean b) return b;
         if (v instanceof String s) return Boolean.parseBoolean(s);
         return false;
+    }
+
+    private static int getInt(Map<String, Object> map, String key) {
+        Object v = map.get(key);
+        if (v instanceof Integer i) return i;
+        if (v instanceof Long l) return l.intValue();
+        if (v instanceof String s) {
+            try {
+                return Integer.parseInt(s.trim());
+            } catch (NumberFormatException ignored) {
+                return 0;
+            }
+        }
+        return 0;
     }
 }

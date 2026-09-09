@@ -48,4 +48,29 @@ class ConversationTest {
         assertThrows(UnsupportedOperationException.class,
                 () -> cm.getMessages().add(new Message(Message.Role.USER, "x")));
     }
+
+    @Test
+    void replaceMessages深拷贝() {
+        ConversationManager cm = new ConversationManager();
+        cm.addUserMessage("旧");
+        List<Message> newMsgs = new java.util.ArrayList<>();
+        newMsgs.add(new Message(Message.Role.USER, "新1"));
+        newMsgs.add(new Message(Message.Role.ASSISTANT, "新2"));
+        cm.replaceMessages(newMsgs);
+        // 修改入参列表不影响 conversation
+        newMsgs.add(new Message(Message.Role.USER, "污染"));
+        assertEquals(2, cm.size());
+        assertEquals("新1", cm.getMessages().get(0).getContent());
+        assertEquals("新2", cm.getMessages().get(1).getContent());
+    }
+
+    @Test
+    void replaceMessages空列表() {
+        ConversationManager cm = new ConversationManager();
+        cm.addUserMessage("旧");
+        cm.replaceMessages(null);
+        assertEquals(0, cm.size());
+        cm.replaceMessages(List.of());
+        assertEquals(0, cm.size());
+    }
 }

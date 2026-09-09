@@ -137,7 +137,11 @@ public class OpenAiClient implements LlmClient {
                 queue.put(new StreamEvent.StreamEnd("stop", inputTokens, outputTokens));
             } catch (Exception e) {
                 try {
-                    queue.put(new StreamEvent.Error(e.getMessage() != null ? e.getMessage() : e.toString()));
+                    Throwable cause = PromptTooLongException.isPromptTooLong(e)
+                            ? new PromptTooLongException(e)
+                            : e;
+                    queue.put(new StreamEvent.Error(
+                            cause.getMessage() != null ? cause.getMessage() : cause.toString(), cause));
                 } catch (InterruptedException ignored) {}
             }
         });

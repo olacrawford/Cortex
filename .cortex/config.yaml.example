@@ -9,6 +9,7 @@ providers:
     api_key: sk-ant-xxxxxxxxxxxxxxxxxxxxxxxx
     model: claude-sonnet-4-20250514
     thinking: true
+    context_window: 200000   # 可选，单位 token；未配置时按 protocol 默认（anthropic 200000、openai 128000）
 
   # - name: deepseek
   #   protocol: openai-compat
@@ -28,3 +29,4 @@ providers:
 #   api_key    认证密钥（必填，不回显）
 #   model      模型名（状态栏右侧显示）
 #   thinking   可选；仅 anthropic 生效（扩展思考）
+#   context_window  可选；上下文窗口（token），未配置时按 protocol 默认

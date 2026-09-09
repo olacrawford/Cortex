@@ -105,4 +105,49 @@ class ConfigLoaderTest {
         ConfigException e = assertThrows(ConfigException.class, () -> ConfigLoader.load(p.toString()));
         assertTrue(e.getMessage().contains("providers"));
     }
+
+    @Test
+    void effectiveContextWindow未配置走协议默认() {
+        ProviderConfig pc = new ProviderConfig();
+        pc.setProtocol("anthropic");
+        assertEquals(200000, pc.effectiveContextWindow());
+    }
+
+    @Test
+    void effectiveContextWindow配置0走协议默认() {
+        ProviderConfig pc = new ProviderConfig();
+        pc.setProtocol("openai");
+        pc.setContextWindow(0);
+        assertEquals(128000, pc.effectiveContextWindow());
+    }
+
+    @Test
+    void effectiveContextWindow正数返回配置值() {
+        ProviderConfig pc = new ProviderConfig();
+        pc.setProtocol("anthropic");
+        pc.setContextWindow(80000);
+        assertEquals(80000, pc.effectiveContextWindow());
+    }
+
+    @Test
+    void effectiveContextWindow未知协议走保守默认() {
+        ProviderConfig pc = new ProviderConfig();
+        pc.setProtocol("unknown");
+        assertEquals(200000, pc.effectiveContextWindow());
+    }
+
+    @Test
+    void 加载contextWindow配置() throws IOException {
+        Path p = writeConfig("""
+                providers:
+                  - name: claude
+                    protocol: anthropic
+                    api_key: sk-ant-xxx
+                    model: m
+                    context_window: 100000
+                """);
+        AppConfig cfg = ConfigLoader.load(p.toString());
+        assertEquals(100000, cfg.getProviders().get(0).getContextWindow());
+        assertEquals(100000, cfg.getProviders().get(0).effectiveContextWindow());
+    }
 }

@@ -1,5 +1,10 @@
 package com.cortex;
 
+import com.cortex.agent.SessionRuntime;
+import com.cortex.compact.Recovery;
+import com.cortex.compact.state.AutoCompactTrackingState;
+import com.cortex.compact.state.ContentReplacementState;
+import com.cortex.compact.state.SessionContext;
 import com.cortex.config.AppConfig;
 import com.cortex.config.ConfigException;
 import com.cortex.config.ConfigLoader;
@@ -47,8 +52,14 @@ public class Cortex {
             }
 
             PermissionEngine engine = PermissionEngine.create(root);
-            CortexModel model = new CortexModel(config.getProviders(), registry, engine);
+            // ch08：会话级上下文管理状态（决策账本 / 文件追踪 / 熔断计数 / 会话目录），跨 run 持有
+            SessionContext session = SessionContext.create(root);
+            SessionRuntime runtime = new SessionRuntime(
+                    new ContentReplacementState(), new Recovery.RecoveryState(),
+                    new AutoCompactTrackingState(), session, 0);
+            CortexModel model = new CortexModel(config.getProviders(), registry, engine, runtime);
             Program program = new Program(model);
+            model.attach(program);
             program.run();
         } catch (ConfigException e) {
             System.err.println("配置错误: " + e.getMessage());
