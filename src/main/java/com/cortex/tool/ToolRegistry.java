@@ -61,6 +61,11 @@ public final class ToolRegistry {
         return t != null && t.readOnly();
     }
 
+    /** 已注册工具数量（/status 用，O(1)）。 */
+    public int count() {
+        return tools.size();
+    }
+
     /**
      * 按名执行工具。未知工具、参数解析失败、执行异常一律返回 error 结果而非抛异常。
      *

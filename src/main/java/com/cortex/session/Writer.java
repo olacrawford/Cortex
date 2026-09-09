@@ -43,6 +43,11 @@ public final class Writer implements Closeable {
         this.model = model;
     }
 
+    /** 当前会话存档 JSONL 的绝对路径（/session 用）。 */
+    public Path path() {
+        return path;
+    }
+
     /** Conversation 的 onAppend 回调：每条消息追加落盘，首条携带 model。 */
     public void onAppend(com.cortex.conversation.Message msg) {
         try {

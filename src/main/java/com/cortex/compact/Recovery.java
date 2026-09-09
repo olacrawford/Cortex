@@ -60,6 +60,16 @@ public final class Recovery {
                 lock.unlock();
             }
         }
+
+        /** 清空文件读取记录（/clear 开新会话时调用）。 */
+        public void reset() {
+            lock.lock();
+            try {
+                files.clear();
+            } finally {
+                lock.unlock();
+            }
+        }
     }
 
     /**

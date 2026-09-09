@@ -43,4 +43,14 @@ public final class AutoCompactTrackingState {
             lock.unlock();
         }
     }
+
+    /** 失败计数归零（/clear 开新会话时调用）。 */
+    public void reset() {
+        lock.lock();
+        try {
+            consecutiveFailures = 0;
+        } finally {
+            lock.unlock();
+        }
+    }
 }

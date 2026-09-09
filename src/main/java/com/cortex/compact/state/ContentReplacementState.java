@@ -84,4 +84,15 @@ public final class ContentReplacementState {
             lock.unlock();
         }
     }
+
+    /** 清空决策账本（/clear 开新会话时调用）。 */
+    public void reset() {
+        lock.lock();
+        try {
+            seenIds.clear();
+            replacements.clear();
+        } finally {
+            lock.unlock();
+        }
+    }
 }

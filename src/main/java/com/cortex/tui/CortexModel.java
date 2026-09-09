@@ -5,10 +5,14 @@ import com.cortex.agent.AgentEvent;
 import com.cortex.agent.ApprovalRequest;
 import com.cortex.agent.CancelToken;
 import com.cortex.agent.CompactEvent;
+import com.cortex.agent.CompactPhase;
 import com.cortex.agent.Phase;
 import com.cortex.agent.SessionRuntime;
 import com.cortex.agent.ToolEvent;
-import com.cortex.compact.ContextCompactor;
+import com.cortex.command.Builtins;
+import com.cortex.command.CommandRegistry;
+import com.cortex.command.Dispatch;
+import com.cortex.command.Kind;
 import com.cortex.compact.Token;
 import com.cortex.compact.state.SessionContext;
 import com.cortex.config.ProviderConfig;
@@ -20,7 +24,6 @@ import com.cortex.permission.Mode;
 import com.cortex.permission.Outcome;
 import com.cortex.permission.PermissionEngine;
 import com.cortex.prompt.Prompt;
-import com.cortex.prompt.Reminder;
 import com.cortex.session.SessionInfo;
 import com.cortex.session.SessionList;
 import com.cortex.session.SessionLoader;
@@ -50,8 +53,10 @@ import java.util.concurrent.BlockingQueue;
 /**
  * 主 TUI 模型：多 provider 选择、输入、Agent 单轮闭环事件渲染、spinner 计时、scrollback 提交与错误反馈。
  * 状态机：{@link AppState#PROVIDER_SELECT}（多 provider）→ {@link AppState#CHAT}。
+ * 阶段9：斜杠命令统一走 {@link CommandRegistry} 分发（handler 仅依赖 {@link com.cortex.command.Ui} 抽象），
+ * 输入首字符为 "/" 时弹出补全菜单。
  */
-public class CortexModel implements Model {
+public class CortexModel implements Model, com.cortex.command.Ui {
 
     private static final Duration POLL_INTERVAL = Duration.ofMillis(60);
     /** 工具结果摘要最多展示的行数（完整结果已回灌进对话历史）。 */
@@ -76,6 +81,14 @@ public class CortexModel implements Model {
     private List<SessionInfo> resumeList = List.of();
     private int resumeIndex;
     private String resumeFilter = "";
+
+    // 斜杠命令体系（阶段9）：注册中心 + 补全菜单 + handler 执行期输出缓冲
+    private final CommandRegistry cmdRegistry = new CommandRegistry();
+    private final CompletionMenu completion = new CompletionMenu();
+    /** handler 执行期间 Ui.println/error/动作方法缓冲的渲染命令，dispatchSlash 返回时统一带出。 */
+    private List<Command> cmdOutputs = new ArrayList<>();
+    /** injectAndSend 标记：handler 返回后由 dispatchSlash 统一开启 LLM 回合。 */
+    private boolean cmdStartTurn;
 
     private AppState state = AppState.CHAT;
     private int width = 80;
@@ -129,6 +142,8 @@ public class CortexModel implements Model {
         this.instructionText = instructionText == null ? "" : instructionText;
         this.memoryText = memoryText == null ? "" : memoryText;
         this.sessionsDir = sessionsDir;
+        // 阶段9：注册 12 条内置命令；名字/别名冲突在启动期立即抛 IllegalStateException 终止启动（F2/N4）
+        Builtins.registerAll(cmdRegistry);
         if (writer != null) {
             this.conversation = new ConversationManager(writer::onAppend, writer::onReplace);
         }
@@ -161,7 +176,7 @@ public class CortexModel implements Model {
                 if (state == AppState.CHAT) {
                     return new UpdateResult<>(this, Command.batch(
                             Command.println(bannerBlock()),
-                            Command.println("就绪。")));
+                            Command.println("就绪。输入 /help 查看可用命令。")));
                 }
             }
             return new UpdateResult<>(this, null);
@@ -255,6 +270,13 @@ public class CortexModel implements Model {
         if (state == AppState.RESUMING) {
             return onResumeKey(key);
         }
+        // 补全菜单激活时优先消费 ↑/↓/Tab/回车/ESC（F29~F32）
+        if (state == AppState.CHAT && !streaming) {
+            UpdateResult<? extends Model> menuHandled = handleCompletionKey(key);
+            if (menuHandled != null) {
+                return menuHandled;
+            }
+        }
         switch (key.key()) {
             case "shift+tab" -> {
                 // 仅空闲态生效：循环切换权限模式（F7），跨轮保持
@@ -304,13 +326,14 @@ public class CortexModel implements Model {
                     return new UpdateResult<>(this, Command.batch(
                             Command.println(bannerBlock()),
                             Command.println("已连接: " + chosen.getName() + " (" + chosen.getModel() + ")"),
-                            Command.println("就绪。")));
+                            Command.println("就绪。输入 /help 查看可用命令。")));
                 }
                 return submit();
             }
             case "backspace" -> {
                 if (!streaming && !input.isEmpty()) {
                     input = input.substring(0, input.length() - 1);
+                    syncCompletionFromInput();
                 }
                 return new UpdateResult<>(this, null);
             }
@@ -318,8 +341,61 @@ public class CortexModel implements Model {
                 // 普通字符：拼入输入缓冲（流式期间忽略输入）
                 if (!streaming) {
                     input += new String(key.runes());
+                    syncCompletionFromInput();
                 }
                 return new UpdateResult<>(this, null);
+            }
+        }
+    }
+
+    // ─── 斜杠命令补全菜单（阶段9）───
+
+    /** 输入内容变化后刷新补全菜单：首字符为 "/" 激活并前缀过滤，否则关闭（F24/F26）。 */
+    private void syncCompletionFromInput() {
+        completion.update(input, cmdRegistry);
+    }
+
+    /**
+     * 菜单激活时的键位处理：消费返回非 null UpdateResult；返回 null 表示透传给输入编辑/提交路径。
+     * 零匹配时回车透传（走未命中提示分支）、Tab/ESC 仅关闭菜单（F32b）。
+     */
+    private UpdateResult<? extends Model> handleCompletionKey(KeyPressMessage key) {
+        if (!completion.active()) {
+            return null;
+        }
+        switch (key.key()) {
+            case "up" -> {
+                completion.moveUp();
+                return new UpdateResult<>(this, null);
+            }
+            case "down" -> {
+                completion.moveDown();
+                return new UpdateResult<>(this, null);
+            }
+            case "tab" -> {
+                com.cortex.command.Command sel = completion.selected();
+                completion.hide();
+                if (sel != null) {
+                    input = "/" + sel.name();
+                    return submit();
+                }
+                return new UpdateResult<>(this, null);
+            }
+            case "enter" -> {
+                com.cortex.command.Command sel = completion.selected();
+                if (sel == null) {
+                    return null; // 零匹配：回车走 submit 的未命中提示分支（F32b）
+                }
+                completion.hide();
+                input = "/" + sel.name();
+                return submit();
+            }
+            case "esc" -> {
+                completion.hide(); // 输入内容保持不变，光标回到输入框（F31）
+                return new UpdateResult<>(this, null);
+            }
+            default -> {
+                return null; // 其余键透传给输入编辑（F32）
             }
         }
     }
@@ -348,21 +424,64 @@ public class CortexModel implements Model {
         String text = input.strip();
         input = "";
         if (text.isEmpty()) {
+            // 空输入与纯空白早返回，不进分发器也不进 LLM（F5）
             return new UpdateResult<>(this, null);
         }
-        Optional<Commands.CommandHandler> handler = Commands.dispatchCommand(text);
-        if (handler.isPresent()) {
-            return handler.get().handle(this);
+        Dispatch.Parsed parsed = Dispatch.parse(text);
+        if (!parsed.isSlash()) {
+            conversation.addUserMessage(text);
+            String userLine = Styles.USER_PREFIX.apply("❯ ") + text;
+            committed.add(userLine);
+            return startTurn(userLine);
         }
-
-        conversation.addUserMessage(text);
-        String userLine = Styles.USER_PREFIX.apply("❯ ") + text;
-        committed.add(userLine);
-        return startTurn(userLine);
+        return dispatchSlash(parsed);
     }
 
-    /** 启动一轮 Agent Loop：per-turn 取消句柄 + 事件队列 + tick 轮询。 */
+    /**
+     * 斜杠命令分发（F3/F6）：lookup 命中后按 Kind 做 idle 守护（UI/PROMPT 仅 idle 可执行，N3a），
+     * handler 异常兜底为错误提示，最后把 handler 缓冲的输出与待启动回合统一带出。
+     */
+    private UpdateResult<? extends Model> dispatchSlash(Dispatch.Parsed parsed) {
+        cmdOutputs = new ArrayList<>();
+        cmdStartTurn = false;
+        Optional<com.cortex.command.Command> cmdOpt = cmdRegistry.lookup(parsed.name());
+        if (cmdOpt.isEmpty()) {
+            // 退化输入（纯 "/" 或带参数）不拼悬空斜杠（N4 对应提示文案约束）
+            String hint = parsed.name().isEmpty()
+                    ? "未知命令,输入 /help 查看可用命令"
+                    : "未知命令: /" + parsed.name() + ",输入 /help 查看可用命令";
+            println(hint);
+        } else {
+            com.cortex.command.Command cmd = cmdOpt.get();
+            if ((cmd.kind() == Kind.UI || cmd.kind() == Kind.PROMPT) && !idle()) {
+                error("请等待当前任务完成");
+            } else {
+                try {
+                    cmd.handler().handle(this);
+                } catch (Exception e) {
+                    error(e.getMessage() != null ? e.getMessage() : e.toString());
+                }
+            }
+        }
+        List<Command> outs = new ArrayList<>(cmdOutputs);
+        if (cmdStartTurn) {
+            outs.add(beginTurn());
+        }
+        if (outs.isEmpty()) {
+            return new UpdateResult<>(this, null);
+        }
+        return new UpdateResult<>(this, Command.batch(outs.toArray(new Command[0])));
+    }
+
+    /** 启动一轮 Agent Loop：定型 user 行 + per-turn 取消句柄 + 事件队列 + tick 轮询。 */
     private UpdateResult<? extends Model> startTurn(String userLine) {
+        return new UpdateResult<>(this, Command.batch(
+                Command.println(userLine),
+                beginTurn()));
+    }
+
+    /** Agent Loop 的共享状态准备（startTurn 与 injectAndSend 两条路径共用）；返回 tick 轮询命令。 */
+    private Command beginTurn() {
         streamBuf = new StringBuilder();
         curTools.clear();
         iter = 0;
@@ -372,10 +491,7 @@ public class CortexModel implements Model {
         turnCancel = new CancelToken();
         // Agent 虚拟线程内跑 ReAct 循环（请求 → 权限判定 → 工具 → 回灌 → 下一轮……直到停止条件）
         agentQueue = agent.run(conversation, mode, turnCancel);
-
-        return new UpdateResult<>(this, Command.batch(
-                Command.println(userLine),
-                Command.tick(POLL_INTERVAL, t -> new StreamTickMessage())));
+        return Command.tick(POLL_INTERVAL, t -> new StreamTickMessage());
     }
 
     // ─── Agent 事件轮询 ───
@@ -394,7 +510,7 @@ public class CortexModel implements Model {
                     case AgentEvent.Text delta -> streamBuf.append(delta.delta());
                     case AgentEvent.Tool tool -> turnOver |= handleToolEvent(tool, outputs);
                     case CompactEvent compact -> {
-                        String text = Commands.formatCompactNotice(compact);
+                        String text = formatCompactNotice(compact);
                         String line = Styles.MUTED.apply("⊕ " + text);
                         committed.add(line);
                         outputs.add(Command.println(line));
@@ -625,7 +741,12 @@ public class CortexModel implements Model {
         }
         sb.append(separatorLine()).append("\r\n");
         sb.append(Styles.INPUT_PROMPT.apply("❯ ")).append(input.isEmpty() ? Styles.MUTED.apply("Send a message...") : input);
-        sb.append("\r\n").append(separatorLine()).append("\r\n");
+        sb.append("\r\n");
+        // 补全菜单紧贴输入框下方、状态栏上方（N6）
+        for (String menuLine : completion.renderLines()) {
+            sb.append(menuLine).append("\r\n");
+        }
+        sb.append(separatorLine()).append("\r\n");
         sb.append(statusBar());
     }
 
@@ -705,30 +826,202 @@ public class CortexModel implements Model {
 
     // ─── Commands 处理器辅助 ───
 
-    /** /exit：退出主循环。 */
-    UpdateResult<? extends Model> commandExit() {
-        return new UpdateResult<>(this, Command.quit());
+    /** 统一渲染压缩状态提示文案（自动 / 紧急 / 手动三条路径共用）。 */
+    static String formatCompactNotice(CompactEvent ev) {
+        return switch (ev.phase()) {
+            case BEFORE_AUTO -> "正在压缩上下文...";
+            case BEFORE_EMERGENCY -> "上下文撞墙,自动压缩中...";
+            case AFTER_AUTO, AFTER_EMERGENCY -> ev.error() != null
+                    ? "压缩失败:" + ev.error().getMessage()
+                    : "已压缩,token 从 " + ev.before() + " 降至 " + ev.after();
+        };
     }
 
-    /** /resume：进入会话列表恢复流程（仅空闲态可用）。 */
-    UpdateResult<? extends Model> commandResume() {
-        if (state != AppState.CHAT || streaming) {
-            return pushSystemMessage("请等待当前任务完成");
+    // ─── Ui 接口实现（阶段9）：命令 handler 操作 TUI 的唯一通道 ───
+
+    @Override
+    public void println(String msg) {
+        String line = Styles.MUTED.apply("⊕ " + msg);
+        committed.add(line);
+        cmdOutputs.add(Command.println(line));
+    }
+
+    @Override
+    public void error(String msg) {
+        String line = Styles.ERROR.apply("✖ " + msg);
+        committed.add(line);
+        cmdOutputs.add(Command.println(line));
+    }
+
+    @Override
+    public com.cortex.permission.Mode mode() {
+        return mode;
+    }
+
+    @Override
+    public void setMode(com.cortex.permission.Mode m) {
+        this.mode = m;
+    }
+
+    @Override
+    public void injectAndSend(String displayLabel, String presetPrompt) {
+        conversation.addUserMessage(presetPrompt);
+        String userLine = Styles.USER_PREFIX.apply("❯ ") + displayLabel;
+        committed.add(userLine);
+        cmdOutputs.add(Command.println(userLine));
+        cmdStartTurn = true;
+    }
+
+    @Override
+    public long usageIn() {
+        return usageIn;
+    }
+
+    @Override
+    public long usageOut() {
+        return usageOut;
+    }
+
+    @Override
+    public String modelName() {
+        return activeProvider != null ? activeProvider.getModel() : "";
+    }
+
+    @Override
+    public String cwd() {
+        return System.getProperty("user.dir");
+    }
+
+    @Override
+    public int toolCount() {
+        return registry.count();
+    }
+
+    @Override
+    public List<String> memoryFiles() {
+        if (memMgr == null) {
+            return List.of();
         }
+        com.cortex.memory.Manager.Files files = memMgr.listFiles();
+        List<String> all = new ArrayList<>(files.project());
+        all.addAll(files.user());
+        return List.copyOf(all);
+    }
+
+    @Override
+    public String sessionPath() {
+        return writer != null ? writer.path().toString() : "";
+    }
+
+    @Override
+    public String sessionId() {
+        return runtime.session != null ? runtime.session.sessionId() : "";
+    }
+
+    @Override
+    public void quit() {
+        cmdOutputs.add(Command.quit());
+    }
+
+    /** /compact：虚拟线程调 runForceCompact，完成后回投 UI 渲染系统消息。命令不写入对话历史。 */
+    @Override
+    public void forceCompact() {
+        Thread.ofVirtual().start(() -> {
+            List<ToolDef> defs = currentDefs();
+            Agent.ForceCompactResult res = runForceCompact(defs);
+            CompactEvent ev = res.error() != null
+                    ? new CompactEvent(CompactPhase.AFTER_AUTO, 0, 0, res.error())
+                    : new CompactEvent(CompactPhase.AFTER_AUTO, res.before(), res.after(), null);
+            pushCompactNotice(formatCompactNotice(ev));
+        });
+    }
+
+    /** /resume：进入会话列表恢复流程（idle 守护已由 dispatcher 按 Kind 统一完成）。 */
+    @Override
+    public void openResumeMenu() {
         try {
             List<SessionInfo> all = SessionList.list(sessionsDir);
             if (all.isEmpty()) {
-                return pushSystemMessage("没有可恢复的会话");
+                println("没有可恢复的会话");
+                return;
             }
             this.allResumeSessions = all;
             this.resumeList = filterResume(all, "");
             this.resumeIndex = 0;
             this.resumeFilter = "";
             this.state = AppState.RESUMING;
-            return new UpdateResult<>(this, Command.println(renderResume()));
+            cmdOutputs.add(Command.println(renderResume()));
         } catch (IOException e) {
-            return pushSystemMessage("会话扫描失败: " + e.getMessage());
+            error("会话扫描失败: " + e.getMessage());
         }
+    }
+
+    /** /clear：关旧 writer → 开新会话存档 → 重建 conversation 挂新 writer → 重置 runtime 压缩态与累计计数（F17）。 */
+    @Override
+    public void clearAndNewSession() {
+        try {
+            if (writer != null) {
+                writer.close();
+            }
+            SessionContext newSesCtx = SessionContext.create(workspaceRoot());
+            Writer newWriter = Writer.create(newSesCtx.sessionDir());
+            newWriter.setModel(activeProvider != null ? activeProvider.getModel() : null);
+            this.writer = newWriter;
+            // 旧 writer 关闭后其 hook 已失效，必须重建 conversation 才能挂上新 writer
+            this.conversation = new ConversationManager(newWriter::onAppend, newWriter::onReplace);
+            runtime.resetForNewSession(newSesCtx);
+            iter = 0;
+            usageIn = 0;
+            usageOut = 0;
+            committed.clear();
+            println("已结束当前会话,开启新会话 " + newSesCtx.sessionId());
+        } catch (IOException e) {
+            error("开启新会话失败: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public boolean idle() {
+        return state == AppState.CHAT && !streaming;
+    }
+
+    /** 渲染一条系统消息到 scrollback（后台压缩提示 / 恢复失败等路径）。不写入 conversation。 */
+    UpdateResult<? extends Model> pushSystemMessage(String text) {
+        String line = Styles.MUTED.apply("⊕ " + text);
+        committed.add(line);
+        return new UpdateResult<>(this, Command.println(line));
+    }
+
+    /** 后台线程回投：把手动压缩结果文本推给 UI 线程。 */
+    void pushCompactNotice(String text) {
+        if (program != null) {
+            program.send(new CompactNoticeMessage(text));
+        }
+    }
+
+    /** 当前工具定义（与下一次 run 的 Request.tools 保持一致）。 */
+    List<ToolDef> currentDefs() {
+        return registry.definitions();
+    }
+
+    /** 手动 /compact 调用入口（由 forceCompact 在后台线程触发）。 */
+    Agent.ForceCompactResult runForceCompact(List<ToolDef> defs) {
+        return agent.runForceCompact(conversation, defs);
+    }
+
+    // ─── 测试观察点（包私有）───
+    ConversationManager conversationForTest() {
+        return conversation;
+    }
+
+    /** 注入自定义命令用于分发行为单测（如 handler 抛异常兜底）。 */
+    void registerForTest(com.cortex.command.Command cmd) {
+        cmdRegistry.register(cmd);
+    }
+
+    /** 不启动 Agent 直接标记流式态，用于验证 UI/PROMPT 命令的 idle 守护。 */
+    void markBusyForTest() {
+        this.streaming = true;
     }
 
     // ─── /resume 会话列表导航（ch09）───
@@ -823,46 +1116,5 @@ public class CortexModel implements Model {
 
     private Path workspaceRoot() {
         return sessionsDir.getParent() == null ? Path.of("").toAbsolutePath() : sessionsDir.getParent().getParent();
-    }
-
-    /** /plan：切换 Plan Mode，输出提示。 */
-    UpdateResult<? extends Model> commandPlan() {
-        mode = Mode.PLAN;
-        String hint = Styles.MUTED.apply("⊕ 已进入计划模式：模型仅可用只读工具产出计划，用 /do 批准执行");
-        committed.add(hint);
-        return new UpdateResult<>(this, Command.println(hint));
-    }
-
-    /** /do：切回 DEFAULT，注入执行指令并启动一轮。 */
-    UpdateResult<? extends Model> commandDo() {
-        mode = Mode.DEFAULT;
-        conversation.addUserMessage(Reminder.EXECUTE_DIRECTIVE);
-        String doLine = Styles.USER_PREFIX.apply("❯ ") + Reminder.EXECUTE_DIRECTIVE;
-        committed.add(doLine);
-        return startTurn(doLine);
-    }
-
-    /** 渲染一条系统消息到 scrollback（命令路径 / 未知命令 / 手动压缩提示）。不写入 conversation。 */
-    UpdateResult<? extends Model> pushSystemMessage(String text) {
-        String line = Styles.MUTED.apply("⊕ " + text);
-        committed.add(line);
-        return new UpdateResult<>(this, Command.println(line));
-    }
-
-    /** 后台线程回投：把手动压缩结果文本推给 UI 线程。 */
-    void pushCompactNotice(String text) {
-        if (program != null) {
-            program.send(new CompactNoticeMessage(text));
-        }
-    }
-
-    /** 当前工具定义（与下一次 run 的 Request.tools 保持一致）。 */
-    List<ToolDef> currentDefs() {
-        return registry.definitions();
-    }
-
-    /** 手动 /compact 调用入口（由 Commands 在后台线程触发）。 */
-    Agent.ForceCompactResult runForceCompact(List<ToolDef> defs) {
-        return agent.runForceCompact(conversation, defs);
     }
 }

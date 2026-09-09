@@ -42,6 +42,22 @@ public final class Store {
         return Files.readString(idx);
     }
 
+    /** 列出本层记忆目录下的 .md 文件名（含 MEMORY.md），按文件名字典序；目录不存在视为空。 */
+    public List<String> listNoteFiles() {
+        if (!Files.isDirectory(dir)) {
+            return List.of();
+        }
+        try (var stream = Files.list(dir)) {
+            return stream.map(p -> p.getFileName().toString())
+                    .filter(n -> n.endsWith(".md"))
+                    .sorted()
+                    .toList();
+        } catch (IOException e) {
+            LOG.warning("列出记忆文件失败: " + e.getMessage());
+            return List.of();
+        }
+    }
+
     /** 执行一组笔记操作（create/update/delete），更新文件与索引。 */
     public void apply(List<UpdateAction> actions) throws IOException {
         if (actions == null || actions.isEmpty()) {

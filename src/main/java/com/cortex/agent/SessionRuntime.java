@@ -95,4 +95,23 @@ public final class SessionRuntime {
             anchorLock.unlock();
         }
     }
+
+    /**
+     * /clear 开新会话时调用：重置压缩三态（决策账本/恢复快照/熔断计数）、
+     * usageAnchor 与回合数，并把会话上下文指向新 session。contextWindow 保留。
+     */
+    public void resetForNewSession(SessionContext newSession) {
+        replacement.reset();
+        recovery.reset();
+        autoTracking.reset();
+        anchorLock.lock();
+        try {
+            usageAnchor = 0;
+            anchorMsgLen = 0;
+            turnCount = 0;
+        } finally {
+            anchorLock.unlock();
+        }
+        this.session = newSession;
+    }
 }
