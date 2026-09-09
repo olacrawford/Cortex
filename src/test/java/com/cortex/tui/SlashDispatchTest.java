@@ -28,10 +28,14 @@ class SlashDispatchTest {
     @TempDir
     Path tmp;
 
+    @TempDir
+    Path userHome;
+
     private CortexModel app;
+    private com.cortex.skill.SkillCatalog catalog;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         ProviderConfig p = new ProviderConfig();
         p.setName("test");
         p.setProtocol("anthropic");
@@ -39,9 +43,19 @@ class SlashDispatchTest {
         p.setModel("test-model");
         // 指向不可达的本地端口：测试中的回合会立即连接失败，不触外网
         p.setBaseUrl("http://127.0.0.1:1");
+        // 阶段10：项目层放一个测试技能 + 用户层覆盖同名技能
+        catalog = new com.cortex.skill.SkillCatalog();
+        java.nio.file.Files.createDirectories(tmp.resolve(".cortex/skills/test-skill"));
+        java.nio.file.Files.writeString(tmp.resolve(".cortex/skills/test-skill/SKILL.md"),
+                "---\nname: test-skill\ndescription: 测试技能\n---\n请按步骤测试当前工作区。");
+        java.nio.file.Files.createDirectories(tmp.resolve(".cortex/skills/args-skill"));
+        java.nio.file.Files.writeString(tmp.resolve(".cortex/skills/args-skill/SKILL.md"),
+                "---\nname: args-skill\ndescription: 参数技能\n---\n请分析：$ARGUMENTS");
+        catalog.loadCatalog(tmp, userHome.resolve("skills"));
+
         app = new CortexModel(List.of(p), ToolRegistry.createDefault(),
                 PermissionEngine.create(tmp, System.err), SessionRuntime.empty(200_000),
-                null, null, "", "", tmp.resolve(".cortex/sessions"));
+                null, null, "", "", tmp.resolve(".cortex/sessions"), catalog);
         // 触发一次窗口尺寸消息让模型进入就绪态
         app.update(new com.cortex.tui.tea.WindowSizeMessage(120, 40));
     }
@@ -203,8 +217,8 @@ class SlashDispatchTest {
         String viewAll = stripAnsi(app.view());
         // 12 条候选超过 MAX_ROWS=8：首屏可见前 8 条 + 滚动提示（N5），第 9 条起的 /resume 不可见
         assertTrue(viewAll.contains("/clear"));
-        assertTrue(viewAll.contains("/plan"));
-        assertTrue(viewAll.contains("↓ 4 more"));
+        assertTrue(viewAll.contains("/permission"));
+        assertTrue(viewAll.contains("↓ 7 more"));
         assertFalse(viewAll.contains("/session"), "超出首屏的候选应被滚动窗口隐藏");
 
         type("s");
@@ -243,7 +257,7 @@ class SlashDispatchTest {
         type("/s"); // 候选：session, status；高亮在 session
         app.update(new KeyPressMessage("down", new char[0]));
         String out = pressEnterAndCapture();
-        assertTrue(out.contains("Mode:"), "↓ 后回车应执行 status（输出 Mode: 行）");
+        assertTrue(out.contains("test-skill"), "↓ 后回车应执行次条候选 skills（列出技能清单）");
     }
 
     @Test
@@ -264,5 +278,70 @@ class SlashDispatchTest {
         String out = pressEnterAndCapture();
         assertTrue(out.contains("✖"), "handler 异常应渲染为错误提示");
         assertTrue(out.contains("炸了"));
+    }
+
+    // ─── 阶段10：技能命令 ───
+
+    @Test
+    void 技能注册为skill命令并出现在help中() {
+        assertTrue(app.skillNames().contains("test-skill"));
+        type("/help");
+        String out = pressEnterAndCapture();
+        assertTrue(out.contains("/test-skill"));
+        assertTrue(out.contains("[skill]"), "技能命令 description 应以 [skill] 结尾（N7）");
+    }
+
+    @Test
+    void 无参执行skill注入正文并提示成功() {
+        type("/test-skill");
+        UpdateResult<? extends Model> r = pressEnter();
+        String out = stripAnsi(renderCommands(r.command()));
+        assertTrue(out.contains("skill(test-skill) Successfully loaded skill"), "UI 应有成功提示（F12）");
+        assertEquals(1, conv().size());
+        assertEquals("请按步骤测试当前工作区。", conv().getMessages().get(0).getContent());
+        assertTrue(containsTick(r.command()), "skill 命令应触发 LLM 回合");
+    }
+
+    @Test
+    void 带参执行skill替换ARGUMENTS占位符() {
+        type("/args-skill 分析性能问题");
+        pressEnter();
+        assertEquals(1, conv().size());
+        assertEquals("请分析：分析性能问题", conv().getMessages().get(0).getContent(),
+                "$ARGUMENTS 应被参数替换（F8）");
+    }
+
+    @Test
+    void 无占位符技能带参追加UserRequest段() {
+        type("/test-skill 检查日志");
+        pressEnter();
+        String body = conv().getMessages().get(0).getContent();
+        assertTrue(body.contains("## User Request"));
+        assertTrue(body.contains("检查日志"));
+    }
+
+    @Test
+    void 内置命令带参仍按未命中处理() {
+        type("/status xx");
+        String out = pressEnterAndCapture();
+        assertTrue(out.contains("未知命令"), "非 skill 命令不接受参数（阶段9 F7 语义保留）");
+        assertEquals(0, conv().size());
+    }
+
+    @Test
+    void skills命令列出技能() {
+        type("/skills");
+        String out = pressEnterAndCapture();
+        assertTrue(out.contains("test-skill"));
+        assertTrue(out.contains("args-skill"));
+    }
+
+    @Test
+    void 内置命令优先于同名技能注册路径() {
+        // wireSkillsToAgent 对已占用命令名跳过注册（registerSkillCommand 防冲突）：
+        // /status 仍是内置行为而非任何技能
+        type("/status");
+        String out = pressEnterAndCapture();
+        assertTrue(out.contains("Mode:"));
     }
 }

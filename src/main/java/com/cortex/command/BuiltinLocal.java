@@ -66,4 +66,24 @@ public final class BuiltinLocal {
     public static Command.Handler session() {
         return ui -> ui.println("Session: " + ui.sessionId() + "\nPath: " + ui.sessionPath());
     }
+
+    /** /skills：列出已安装技能名（阶段10）；为空时给出放置路径引导。 */
+    public static Command.Handler skills() {
+        return ui -> {
+            List<String> names = ui.skillNames();
+            if (names.isEmpty()) {
+                ui.println("无已安装技能。\n\n把技能目录（含 SKILL.md）放到 .cortex/skills/ 或 ~/.cortex/skills/，"
+                        + "或用 install_skill 工具从远程安装。");
+                return;
+            }
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < names.size(); i++) {
+                sb.append(names.get(i));
+                if (i < names.size() - 1) {
+                    sb.append("\n");
+                }
+            }
+            ui.println(sb.toString());
+        };
+    }
 }

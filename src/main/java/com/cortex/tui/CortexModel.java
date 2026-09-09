@@ -28,6 +28,9 @@ import com.cortex.session.SessionInfo;
 import com.cortex.session.SessionList;
 import com.cortex.session.SessionLoader;
 import com.cortex.session.Writer;
+import com.cortex.skill.Skill;
+import com.cortex.skill.SkillCatalog;
+import com.cortex.skill.SkillExecutor;
 import com.cortex.tool.ToolRegistry;
 import com.cortex.tui.tea.Command;
 import com.cortex.tui.tea.CompactNoticeMessage;
@@ -46,7 +49,9 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.Optional;
 import java.util.concurrent.BlockingQueue;
 
@@ -55,8 +60,9 @@ import java.util.concurrent.BlockingQueue;
  * 状态机：{@link AppState#PROVIDER_SELECT}（多 provider）→ {@link AppState#CHAT}。
  * 阶段9：斜杠命令统一走 {@link CommandRegistry} 分发（handler 仅依赖 {@link com.cortex.command.Ui} 抽象），
  * 输入首字符为 "/" 时弹出补全菜单。
+ * 阶段10：实现 {@link com.cortex.skill.SkillHost}，provider 就绪后把技能注册为 [skill] 标记的 PROMPT 命令。
  */
-public class CortexModel implements Model, com.cortex.command.Ui {
+public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.skill.SkillHost {
 
     private static final Duration POLL_INTERVAL = Duration.ofMillis(60);
     /** 工具结果摘要最多展示的行数（完整结果已回灌进对话历史）。 */
@@ -89,6 +95,12 @@ public class CortexModel implements Model, com.cortex.command.Ui {
     private List<Command> cmdOutputs = new ArrayList<>();
     /** injectAndSend 标记：handler 返回后由 dispatchSlash 统一开启 LLM 回合。 */
     private boolean cmdStartTurn;
+
+    // 技能系统（阶段10）：编目中心（可空 = 技能未装配）+ inline 执行的激活态
+    private final SkillCatalog skillCatalog;
+    private final Set<String> activeSkillNames = new LinkedHashSet<>();
+    /** allowed_tools 过滤器：inline 模式仅记录不生效（phase-10 Plan 决议，安全由权限引擎兜底）。 */
+    private volatile java.util.function.Predicate<String> toolFilter;
 
     private AppState state = AppState.CHAT;
     private int width = 80;
@@ -127,12 +139,20 @@ public class CortexModel implements Model, com.cortex.command.Ui {
 
     public CortexModel(List<ProviderConfig> providers, ToolRegistry registry, PermissionEngine engine,
                        SessionRuntime runtime) {
-        this(providers, registry, engine, runtime, null, null, "", "", Path.of("").toAbsolutePath());
+        this(providers, registry, engine, runtime, null, null, "", "", Path.of("").toAbsolutePath(), null);
     }
 
     public CortexModel(List<ProviderConfig> providers, ToolRegistry registry, PermissionEngine engine,
                        SessionRuntime runtime, Writer writer, Manager memMgr,
                        String instructionText, String memoryText, Path sessionsDir) {
+        this(providers, registry, engine, runtime, writer, memMgr, instructionText, memoryText,
+                sessionsDir, null);
+    }
+
+    public CortexModel(List<ProviderConfig> providers, ToolRegistry registry, PermissionEngine engine,
+                       SessionRuntime runtime, Writer writer, Manager memMgr,
+                       String instructionText, String memoryText, Path sessionsDir,
+                       SkillCatalog skillCatalog) {
         this.providers = providers;
         this.registry = registry;
         this.engine = engine;
@@ -142,6 +162,7 @@ public class CortexModel implements Model, com.cortex.command.Ui {
         this.instructionText = instructionText == null ? "" : instructionText;
         this.memoryText = memoryText == null ? "" : memoryText;
         this.sessionsDir = sessionsDir;
+        this.skillCatalog = skillCatalog;
         // 阶段9：注册 12 条内置命令；名字/别名冲突在启动期立即抛 IllegalStateException 终止启动（F2/N4）
         Builtins.registerAll(cmdRegistry);
         if (writer != null) {
@@ -417,6 +438,58 @@ public class CortexModel implements Model, com.cortex.command.Ui {
         if (writer != null) {
             writer.setModel(provider.getModel());
         }
+        // 阶段10：provider 就绪后把技能注册为斜杠命令（F11）
+        wireSkillsToAgent();
+    }
+
+    // ─── 技能系统（阶段10）───
+
+    /** 把编目中心里的每个技能注册为 [skill] 标记的 PROMPT 命令；同名已占用时跳过（内置命令优先）。 */
+    public void wireSkillsToAgent() {
+        if (skillCatalog == null) {
+            return;
+        }
+        for (Skill s : skillCatalog.list()) {
+            registerSkillCommand(s.meta().name());
+        }
+    }
+
+    private void registerSkillCommand(String name) {
+        if (cmdRegistry.lookup(name).isPresent()) {
+            return;
+        }
+        Skill s = skillCatalog.get(name);
+        String desc = s != null && s.meta().description() != null && !s.meta().description().isBlank()
+                ? s.meta().description().strip()
+                : name + " 技能";
+        cmdRegistry.register(new com.cortex.command.Command(name, List.of(), desc + " [skill]",
+                com.cortex.command.Kind.PROMPT, false, ui -> executeSkillCommand(name, "", "/" + name)));
+    }
+
+    /** 执行 [skill] 命令：getFull 热加载正文（F4）→ inline 渲染注入 → 成功提示（F12）。 */
+    private void executeSkillCommand(String name, String args, String label) {
+        if (skillCatalog == null || skillCatalog.get(name) == null) {
+            println("技能 " + name + " 不存在或未加载");
+            return;
+        }
+        Skill skill = skillCatalog.getFull(name);
+        if (skill.meta().isFork()) {
+            println("技能 " + name + " 为 fork 模式,请通过 SkillExecutor.executeFork 程序化调用");
+            return;
+        }
+        String rendered;
+        try {
+            rendered = SkillExecutor.executeInline(skill, args, this);
+        } catch (IllegalStateException e) {
+            error(e.getMessage());
+            return;
+        }
+        if (rendered == null || rendered.isBlank()) {
+            error("技能 " + name + " 正文为空");
+            return;
+        }
+        injectAndSend(label, rendered);
+        println("skill(" + name + ") Successfully loaded skill");
     }
 
     // ─── 提交一轮对话 ───
@@ -434,17 +507,31 @@ public class CortexModel implements Model, com.cortex.command.Ui {
             committed.add(userLine);
             return startTurn(userLine);
         }
-        return dispatchSlash(parsed);
+        return dispatchSlash(text, parsed);
     }
 
     /**
      * 斜杠命令分发（F3/F6）：lookup 命中后按 Kind 做 idle 守护（UI/PROMPT 仅 idle 可执行，N3a），
      * handler 异常兜底为错误提示，最后把 handler 缓冲的输出与待启动回合统一带出。
      */
-    private UpdateResult<? extends Model> dispatchSlash(Dispatch.Parsed parsed) {
+    private UpdateResult<? extends Model> dispatchSlash(String text, Dispatch.Parsed parsed) {
         cmdOutputs = new ArrayList<>();
         cmdStartTurn = false;
         Optional<com.cortex.command.Command> cmdOpt = cmdRegistry.lookup(parsed.name());
+        String args = "";
+        if (cmdOpt.isEmpty() && text.strip().length() > 1) {
+            // 阶段10：整串（含参数）未命中时按「命令 + 参数」拆分重试——仅 [skill] 命令接受参数。
+            // Dispatch.parse 对带参输入返回空 name，因此这里从原始输入重新拆分。
+            String body = text.strip().substring(1).strip();
+            String[] parts = body.split("\\s+", 2);
+            if (parts.length == 2 && !parts[0].isBlank()) {
+                Optional<com.cortex.command.Command> sk = cmdRegistry.lookup(parts[0].toLowerCase());
+                if (sk.isPresent() && isSkillCommand(sk.get())) {
+                    cmdOpt = sk;
+                    args = parts[1].strip();
+                }
+            }
+        }
         if (cmdOpt.isEmpty()) {
             // 退化输入（纯 "/" 或带参数）不拼悬空斜杠（N4 对应提示文案约束）
             String hint = parsed.name().isEmpty()
@@ -455,6 +542,9 @@ public class CortexModel implements Model, com.cortex.command.Ui {
             com.cortex.command.Command cmd = cmdOpt.get();
             if ((cmd.kind() == Kind.UI || cmd.kind() == Kind.PROMPT) && !idle()) {
                 error("请等待当前任务完成");
+            } else if (isSkillCommand(cmd)) {
+                // [skill] 标记命令由分发器直接执行（args 已拆出），不走零参 handler
+                executeSkillCommand(cmd.name(), args, text.strip());
             } else {
                 try {
                     cmd.handler().handle(this);
@@ -471,6 +561,11 @@ public class CortexModel implements Model, com.cortex.command.Ui {
             return new UpdateResult<>(this, null);
         }
         return new UpdateResult<>(this, Command.batch(outs.toArray(new Command[0])));
+    }
+
+    /** [skill] 标记识别（F11/N7）：注册技能命令时 description 以 "[skill]" 结尾。 */
+    private static boolean isSkillCommand(com.cortex.command.Command cmd) {
+        return cmd.description().endsWith("[skill]");
     }
 
     /** 启动一轮 Agent Loop：定型 user 行 + per-turn 取消句柄 + 事件队列 + tick 轮询。 */
@@ -909,6 +1004,29 @@ public class CortexModel implements Model, com.cortex.command.Ui {
     }
 
     @Override
+    public List<String> skillNames() {
+        return skillCatalog == null ? List.of() : List.copyOf(skillCatalog.names());
+    }
+
+    // ─── SkillHost 实现（阶段10）───
+
+    @Override
+    public void activateSkill(String name, String body) {
+        activeSkillNames.add(name);
+    }
+
+    /** inline 模式仅记录过滤器，不真正切换主对话工具集（phase-10 Plan 决议，安全由权限引擎兜底）。 */
+    @Override
+    public void setToolFilter(java.util.function.Predicate<String> allowed) {
+        this.toolFilter = allowed;
+    }
+
+    @Override
+    public com.cortex.tool.ToolRegistry toolRegistry() {
+        return registry;
+    }
+
+    @Override
     public String sessionPath() {
         return writer != null ? writer.path().toString() : "";
     }
@@ -973,6 +1091,7 @@ public class CortexModel implements Model, com.cortex.command.Ui {
             iter = 0;
             usageIn = 0;
             usageOut = 0;
+            activeSkillNames.clear();
             committed.clear();
             println("已结束当前会话,开启新会话 " + newSesCtx.sessionId());
         } catch (IOException e) {
