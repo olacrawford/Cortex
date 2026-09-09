@@ -17,6 +17,8 @@ import com.cortex.permission.PermissionEngine;
 import com.cortex.prompt.Prompt;
 import com.cortex.session.SessionCleaner;
 import com.cortex.session.Writer;
+import com.cortex.skill.InstallSkillTool;
+import com.cortex.skill.SkillCatalog;
 import com.cortex.tool.Tool;
 import com.cortex.tool.ToolRegistry;
 import com.cortex.tui.CortexModel;
@@ -64,6 +66,14 @@ public class Cortex {
                 }
             }
 
+            // ch10：技能编目（两层扫描）+ 启动期 allowed_tools 校验（不通过的技能打警告并移除）
+            SkillCatalog skillCatalog = new SkillCatalog();
+            skillCatalog.loadCatalog(root);
+            for (String bad : skillCatalog.validateTools(registry)) {
+                System.err.println("[skills] warn: 技能 " + bad + " 的 allowed_tools 引用了未注册工具,已跳过加载");
+                skillCatalog.remove(bad);
+            }
+
             PermissionEngine engine = PermissionEngine.create(root);
             // ch08：会话级上下文管理状态（决策账本 / 文件追踪 / 熔断计数 / 会话目录），跨 run 持有
             SessionContext session = SessionContext.create(root);
@@ -77,7 +87,12 @@ public class Cortex {
                     SessionCleaner.cleanExpired(root.resolve(".cortex/sessions"), Duration.ofDays(30)));
 
             CortexModel model = new CortexModel(config.getProviders(), registry, engine, runtime,
-                    writer, memMgr, instructionText, memoryText, root.resolve(".cortex/sessions"));
+                    writer, memMgr, instructionText, memoryText, root.resolve(".cortex/sessions"),
+                    skillCatalog);
+            // ch10：远程安装工具 → 装完 reload catalog 并重新注册斜杠命令，无需重启
+            registry.register(new InstallSkillTool(skillCatalog, root,
+                    Path.of(System.getProperty("user.home"), ".cortex", "skills"),
+                    model::wireSkillsToAgent));
             Program program = new Program(model);
             model.attach(program);
             program.run();

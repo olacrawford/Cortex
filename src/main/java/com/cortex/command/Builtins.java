@@ -31,6 +31,8 @@ public final class Builtins {
                 Kind.PROMPT, false, BuiltinPrompt.review()));
         reg.register(new Command("session", List.of(), "查看当前会话信息",
                 Kind.LOCAL, false, BuiltinLocal.session()));
+        reg.register(new Command("skills", List.of(), "列出已安装的技能",
+                Kind.LOCAL, false, BuiltinLocal.skills()));
         reg.register(new Command("status", List.of(), "查看运行状态（模式/用量/工具/记忆/模型/目录）",
                 Kind.LOCAL, false, BuiltinLocal.status()));
     }

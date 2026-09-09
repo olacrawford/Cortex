@@ -49,6 +49,9 @@ public interface Ui {
 
     String sessionId();
 
+    /** 已安装技能名清单（skillCatalog 未加载时返回空清单，阶段10）。 */
+    List<String> skillNames();
+
     // ─── 影响界面动作 ───
     void quit();
 
@@ -123,6 +126,11 @@ public interface Ui {
         @Override
         public String sessionId() {
             return "";
+        }
+
+        @Override
+        public List<String> skillNames() {
+            return List.of();
         }
 
         @Override
