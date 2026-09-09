@@ -61,6 +61,14 @@ public final class Manager {
         return combined;
     }
 
+    /** 两级记忆目录下的文件名清单（/memory 用，只列文件名不展开内容）。 */
+    public record Files(List<String> project, List<String> user) {}
+
+    /** 列出项目层与用户层记忆目录下的 .md 文件名；目录缺失视为空清单。 */
+    public Files listFiles() {
+        return new Files(projectStore.listNoteFiles(), userStore.listNoteFiles());
+    }
+
     /** 异步发起记忆更新：独立 virtual thread，不阻塞用户下一次输入。 */
     public void updateAsync(List<Message> recentMsgs) {
         Thread.ofVirtual().name("memory-update").start(() -> {

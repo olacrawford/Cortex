@@ -125,6 +125,8 @@ public class Program {
 
     private KeyMap<KeyPressMessage> buildKeyMap() {
         KeyMap<KeyPressMessage> m = new KeyMap<>();
+        // lone ESC 与方向键序列（ESC [ x）共前缀；默认 1000ms 消歧等待让裸 ESC 迟迟不触发，调短到 150ms
+        m.setAmbiguousTimeout(150);
         m.bind(new KeyPressMessage("enter", new char[]{'\r'}), "\r");
         m.bind(new KeyPressMessage("enter", new char[]{'\n'}), "\n");
         m.bind(new KeyPressMessage("ctrl+c", new char[]{3}), KeyMap.ctrl('C'));
