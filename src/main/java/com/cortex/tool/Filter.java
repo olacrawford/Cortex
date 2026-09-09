@@ -61,8 +61,8 @@ public final class Filter {
         if (p.source() >= 2) {
             cur.removeAll(CUSTOM_AGENT_DISALLOWED_TOOLS);
         }
-        // ③ 后台白名单交集（Fork 豁免理由同上）
-        if (p.background()) {
+        // ③ 后台白名单交集（Fork 豁免理由同上：Fork 工具集与父完全一致，N2/AC5）
+        if (p.background() && !p.fork()) {
             cur.removeIf(name -> !isAllowedInBackground(name));
         }
         // ④ 定义黑名单

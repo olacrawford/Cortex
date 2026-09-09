@@ -7,12 +7,12 @@ import com.cortex.task.Status;
  * 后台任务通知渲染（F19/T26）：任务完成后拼 &lt;task-notification&gt; 块注入主对话 reminder 区
  * （只对模型可见，N7——不进用户视窗、不占工具调用配额）。
  */
-final class Tasks {
+public final class Tasks {
 
     private Tasks() {}
 
     /** BackgroundTask → &lt;task-notification&gt; 文本（含最终结果或错误描述）。 */
-    static String buildTaskNotification(BackgroundTask bt) {
+    public static String buildTaskNotification(BackgroundTask bt) {
         StringBuilder sb = new StringBuilder();
         sb.append("<task-notification>\n");
         sb.append("Task ").append(bt.id())

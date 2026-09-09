@@ -61,6 +61,9 @@ public final class BackgroundTask implements SubAgentRun {
     public String lastActivity() { return lastActivity; }
     public CancelToken cancelToken() { return cancelToken; }
 
+    /** 子对话（SendMessage 续派与调试观察用；只读方请勿直接改写历史）。 */
+    public ConversationManager conversation() { return conv; }
+
     /** 累计 token 用量快照。 */
     public Usage usage() {
         return new Usage(usageIn.get(), usageOut.get(), usageCacheW.get(), usageCacheR.get());

@@ -28,11 +28,15 @@ public final class AgentTool implements Tool {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     /**
-     * 前台子 Agent 自动切后台阈值（F17-②）；tmux 测试可用
-     * {@code -Dcortex.subagent.autoBackgroundMs=5000} 调小。
+     * 前台子 Agent 自动切后台阈值默认值（F17-②）。
+     * tmux 测试可用 {@code -Dcortex.subagent.autoBackgroundMs=5000} 调小（每次 execute 读取）。
      */
-    public static final long AUTO_BACKGROUND_MS =
-            Long.getLong("cortex.subagent.autoBackgroundMs", 120_000L);
+    public static final long AUTO_BACKGROUND_MS = 120_000L;
+
+    /** 当前生效的自动切后台阈值（系统属性可覆盖，场景 10 用）。 */
+    static long autoBackgroundMs() {
+        return Long.getLong("cortex.subagent.autoBackgroundMs", AUTO_BACKGROUND_MS);
+    }
 
     private final AgentCatalogPort catalog;
     private final TaskManagerPort taskMgr;
@@ -64,7 +68,7 @@ public final class AgentTool implements Tool {
     @Override
     public Duration timeout() {
         return bgEnabled
-                ? Duration.ofMillis(AUTO_BACKGROUND_MS + 30_000L)
+                ? Duration.ofMillis(autoBackgroundMs() + 30_000L)
                 : Duration.ofMinutes(10);
     }
 
@@ -215,10 +219,10 @@ public final class AgentTool implements Tool {
             return runForegroundSync(subAgent, subConv, taskText);
         }
 
-        // 前台：等至多 AUTO_BACKGROUND_MS，超时自动转后台（F17-②）
+        // 前台：等至多 autoBackgroundMs，超时自动转后台（F17-②）
         SubAgentRun run = taskMgr.startForeground(subAgent, subConv, name, taskText);
         try {
-            if (run.awaitCompletion(AUTO_BACKGROUND_MS)) {
+            if (run.awaitCompletion(autoBackgroundMs())) {
                 if (run.failed()) {
                     return Result.error("子 Agent 执行失败: " + run.errorMessage());
                 }
