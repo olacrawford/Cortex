@@ -121,7 +121,7 @@ class Layer1Test {
         // 让 spillDir 指向一个已存在的普通文件，resolve 出的子路径写入必然失败
         Path file = tempDir.resolve("not-a-dir");
         Files.writeString(file, "x");
-        SessionContext bad = new SessionContext(session.sessionId(), file);
+        SessionContext bad = new SessionContext(session.sessionId(), session.sessionDir(), file);
 
         List<Message> msgs = List.of(toolMessage(List.of(result("c1", 60000, false))));
         List<Message> out = ContextCompactor.offloadAndSnip(msgs, state, bad);

@@ -27,7 +27,7 @@ class StateTest {
     @Test
     void createSessionContext生成目录() throws IOException {
         SessionContext ctx = SessionContext.create(tempDir);
-        assertTrue(ctx.sessionId().matches("\\d+-[0-9a-f]{8}"));
+        assertTrue(ctx.sessionId().matches("\\d{8}-\\d{6}-[0-9a-f]{4}"));
         assertTrue(Files.isDirectory(ctx.spillDir()));
     }
 

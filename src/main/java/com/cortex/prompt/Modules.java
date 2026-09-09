@@ -46,9 +46,14 @@ public final class Modules {
 
     /** 三个可选空槽：本章内容为空，装配时自动跳过（F1/AC2）。 */
     public static List<Module> optionalModules() {
+        return optionalModules("", "");
+    }
+
+    /** 三个可选空槽：用项目指令与记忆索引填充 custom_instructions / memory（ch09）。 */
+    public static List<Module> optionalModules(String instructions, String memory) {
         return List.of(
-                new Module("custom_instructions", 80, ""),
+                new Module("custom_instructions", 80, instructions == null ? "" : instructions),
                 new Module("skills", 90, ""),
-                new Module("memory", 100, ""));
+                new Module("memory", 100, memory == null ? "" : memory));
     }
 }
