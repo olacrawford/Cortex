@@ -84,8 +84,20 @@ public class Cortex {
             registry.register(new com.cortex.task.TaskGetTool(taskMgr));
             registry.register(new com.cortex.task.TaskStopTool(taskMgr));
             registry.register(new com.cortex.task.SendMessageTool(taskMgr));
+
+            // ch13：Worktree 管理器（非 git 仓库降级为「未启用」，F5/F35）+ 后台过期清理（F34）
+            com.cortex.worktree.WorktreeManager worktreeMgr;
+            try {
+                worktreeMgr = new com.cortex.worktree.WorktreeManager(root);
+                final com.cortex.worktree.WorktreeManager mgr = worktreeMgr;
+                Thread.ofVirtual().name("worktree-sweeper").start(() ->
+                        mgr.sweepStale(java.time.Instant.now().minus(24, java.time.temporal.ChronoUnit.HOURS)));
+            } catch (Exception werr) {
+                System.err.println("[worktree] warn: 管理器未启用（" + werr.getMessage() + "）");
+                worktreeMgr = null;
+            }
             com.cortex.agent.AgentTool agentTool = new com.cortex.agent.AgentTool(
-                    subAgentCatalog, taskMgr, config.effectiveEnableSubAgentBackground());
+                    subAgentCatalog, taskMgr, config.effectiveEnableSubAgentBackground(), worktreeMgr);
             registry.register(agentTool);
 
             PermissionEngine engine = PermissionEngine.create(root);
@@ -102,7 +114,7 @@ public class Cortex {
 
             CortexModel model = new CortexModel(config.getProviders(), registry, engine, runtime,
                     writer, memMgr, instructionText, memoryText, root.resolve(".cortex/sessions"),
-                    skillCatalog, hookEngine, taskMgr, agentTool);
+                    skillCatalog, hookEngine, taskMgr, agentTool, worktreeMgr);
             // ch10：远程安装工具 → 装完 reload catalog 并重新注册斜杠命令，无需重启
             registry.register(new InstallSkillTool(skillCatalog, root,
                     Path.of(System.getProperty("user.home"), ".cortex", "skills"),

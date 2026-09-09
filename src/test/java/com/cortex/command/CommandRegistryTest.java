@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class CommandRegistryTest {
 
     private static Command cmd(String name, String... aliases) {
-        return new Command(name, List.of(aliases), name + " 的描述", Kind.LOCAL, false, ui -> {});
+        return new Command(name, List.of(aliases), name + " 的描述", Kind.LOCAL, false, (ui, args) -> {});
     }
 
     @Test
@@ -57,7 +57,7 @@ class CommandRegistryTest {
         reg.register(cmd("session"));
         reg.register(cmd("status"));
         reg.register(cmd("help"));
-        reg.register(new Command("memory", List.of(), "memory 的描述", Kind.LOCAL, false, ui -> {}));
+        reg.register(new Command("memory", List.of(), "memory 的描述", Kind.LOCAL, false, (ui, args) -> {}));
 
         assertEquals(List.of("session", "status"),
                 reg.prefixMatch("/s").stream().map(Command::name).toList());
@@ -71,7 +71,7 @@ class CommandRegistryTest {
     @Test
     void hidden命令不进visible但仍可命中() {
         CommandRegistry reg = new CommandRegistry();
-        reg.register(new Command("secret", List.of(), "隐藏命令", Kind.LOCAL, true, ui -> {}));
+        reg.register(new Command("secret", List.of(), "隐藏命令", Kind.LOCAL, true, (ui, args) -> {}));
         assertTrue(reg.visible().isEmpty());
         assertTrue(reg.prefixMatch("").isEmpty());
         assertTrue(reg.prefixMatch("sec").isEmpty());

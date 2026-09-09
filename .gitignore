@@ -11,3 +11,7 @@ build/
 bin/
 .cortex/settings.local.yaml
 .cortex/sessions/
+
+# ch13: Worktree 隔离副本（仅供 SubAgent 与手动管理使用）
+.cortex/worktrees/
+.cortex/worktree_session.json

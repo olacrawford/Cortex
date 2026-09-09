@@ -65,6 +65,11 @@ public final class BashTool implements Tool {
 
     @Override
     public Result execute(String argsJson) {
+        return execute(ToolContext.EMPTY, argsJson);
+    }
+
+    @Override
+    public Result execute(ToolContext ctx, String argsJson) {
         BashArgs args;
         try {
             args = MAPPER.readValue(argsJson, BashArgs.class);
@@ -80,6 +85,7 @@ public final class BashTool implements Tool {
                     ? new ProcessBuilder("cmd", "/C", args.command())
                     : new ProcessBuilder("sh", "-c", args.command());
             pb.redirectErrorStream(true);
+            pb.directory(ctx.resolvePath("").toFile()); // 阶段13：explicit cwd（F17）
             Process process = pb.start();
 
             // 虚拟线程异步读输出，避免管道缓冲区写满导致命令卡死

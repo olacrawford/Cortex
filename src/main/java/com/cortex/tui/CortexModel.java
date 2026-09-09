@@ -10,6 +10,7 @@ import com.cortex.agent.Phase;
 import com.cortex.agent.SessionRuntime;
 import com.cortex.agent.ToolEvent;
 import com.cortex.command.Builtins;
+import com.cortex.command.WorktreeAccessor;
 import com.cortex.command.CommandRegistry;
 import com.cortex.command.Dispatch;
 import com.cortex.command.Kind;
@@ -115,6 +116,10 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
     private final Object approvalGate = new Object();
     private final java.util.ArrayDeque<ApprovalRequest> approvalQueue = new java.util.ArrayDeque<>();
 
+    // Worktree 隔离（阶段13）：管理器可空 = 未启用；activeCwd 非空 = 主 Agent 工具调用走 explicit cwd
+    private final com.cortex.worktree.WorktreeManager worktreeMgr;
+    private volatile java.nio.file.Path activeCwd;
+
     private AppState state = AppState.CHAT;
     private int width = 80;
 
@@ -184,6 +189,17 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
                        String instructionText, String memoryText, Path sessionsDir,
                        SkillCatalog skillCatalog, com.cortex.hook.HookEngine hookEngine,
                        com.cortex.task.Manager taskMgr, com.cortex.agent.AgentTool agentTool) {
+        this(providers, registry, engine, runtime, writer, memMgr, instructionText, memoryText,
+                sessionsDir, skillCatalog, hookEngine, taskMgr, agentTool, null);
+    }
+
+    /** 阶段13 全参构造：再接收 Worktree 管理器（可空 = 未启用）。 */
+    public CortexModel(List<ProviderConfig> providers, ToolRegistry registry, PermissionEngine engine,
+                       SessionRuntime runtime, Writer writer, Manager memMgr,
+                       String instructionText, String memoryText, Path sessionsDir,
+                       SkillCatalog skillCatalog, com.cortex.hook.HookEngine hookEngine,
+                       com.cortex.task.Manager taskMgr, com.cortex.agent.AgentTool agentTool,
+                       com.cortex.worktree.WorktreeManager worktreeMgr) {
         this.providers = providers;
         this.registry = registry;
         this.engine = engine;
@@ -197,6 +213,7 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
         this.hookEngine = hookEngine;
         this.taskMgr = taskMgr;
         this.agentTool = agentTool;
+        this.worktreeMgr = worktreeMgr;
         // 阶段11：hook 引擎挂到 runtime，供 Agent 各 emit 点读取
         if (hookEngine != null) {
             runtime.hookEngine = hookEngine;
@@ -218,6 +235,34 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
             taskMgr.setApprovalForwarder(this::upgradeApprovalFromSubAgent);
             Thread.ofVirtual().name("task-done-consumer").start(this::consumeTaskDone);
         }
+        // 阶段13：启动恢复 Worktree 会话（F31/F32）——上一进程 enter 的目录继续生效
+        if (worktreeMgr != null && worktreeMgr.currentSession() != null) {
+            activeCwd = java.nio.file.Path.of(worktreeMgr.currentSession().worktreePath());
+        }
+    }
+
+    // ─── Worktree 隔离（阶段13）───
+
+    /** /worktree 命令的管理能力入口（F24-F28）；未启用返回 null。 */
+    @Override
+    public WorktreeAccessor worktreeAccessor() {
+        if (worktreeMgr == null) {
+            return null;
+        }
+        return new TuiWorktreeAccessor(worktreeMgr,
+                path -> {
+                    activeCwd = path;
+                    if (agent != null) {
+                        agent.setToolContext(toolContextForCwd());
+                    }
+                },
+                () -> activeCwd);
+    }
+
+    /** 当前生效的工具上下文：activeCwd 非空则带 explicit cwd。 */
+    private com.cortex.tool.ToolContext toolContextForCwd() {
+        return activeCwd == null ? com.cortex.tool.ToolContext.EMPTY
+                : com.cortex.tool.ToolContext.EMPTY.withCwd(activeCwd);
     }
 
     // ─── SubAgent 集成（阶段12）───
@@ -573,7 +618,7 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
                 ? s.meta().description().strip()
                 : name + " 技能";
         cmdRegistry.register(new com.cortex.command.Command(name, List.of(), desc + " [skill]",
-                com.cortex.command.Kind.PROMPT, false, ui -> executeSkillCommand(name, "", "/" + name)));
+                com.cortex.command.Kind.PROMPT, false, (ui, args) -> executeSkillCommand(name, "", "/" + name)));
     }
 
     /** 执行 [skill] 命令：getFull 热加载正文（F4）→ inline 渲染注入 → 成功提示（F12）。 */
@@ -677,13 +722,13 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
         Optional<com.cortex.command.Command> cmdOpt = cmdRegistry.lookup(parsed.name());
         String args = "";
         if (cmdOpt.isEmpty() && text.strip().length() > 1) {
-            // 阶段10：整串（含参数）未命中时按「命令 + 参数」拆分重试——仅 [skill] 命令接受参数。
-            // Dispatch.parse 对带参输入返回空 name，因此这里从原始输入重新拆分。
+            // 阶段10/13：整串（含参数）未命中时按「命令 + 参数」拆分重试——仅 [skill] 与
+            // 描述以 [args] 结尾（如 /worktree）的命令接受尾随参数，其余保持未知命令提示。
             String body = text.strip().substring(1).strip();
             String[] parts = body.split("\\s+", 2);
             if (parts.length == 2 && !parts[0].isBlank()) {
                 Optional<com.cortex.command.Command> sk = cmdRegistry.lookup(parts[0].toLowerCase());
-                if (sk.isPresent() && isSkillCommand(sk.get())) {
+                if (sk.isPresent() && (isSkillCommand(sk.get()) || isArgsCommand(sk.get()))) {
                     cmdOpt = sk;
                     args = parts[1].strip();
                 }
@@ -704,7 +749,7 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
                 executeSkillCommand(cmd.name(), args, text.strip());
             } else {
                 try {
-                    cmd.handler().handle(this);
+                    cmd.handler().handle(this, args);
                 } catch (Exception e) {
                     error(e.getMessage() != null ? e.getMessage() : e.toString());
                 }
@@ -725,6 +770,11 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
         return cmd.description().endsWith("[skill]");
     }
 
+    /** [args] 标记识别（阶段13 F29）：接受尾随参数的内置命令（如 /worktree）。 */
+    private static boolean isArgsCommand(com.cortex.command.Command cmd) {
+        return cmd.description().endsWith("[args]");
+    }
+
     /** 启动一轮 Agent Loop：定型 user 行 + per-turn 取消句柄 + 事件队列 + tick 轮询。 */
     private UpdateResult<? extends Model> startTurn(String userLine) {
         return new UpdateResult<>(this, Command.batch(
@@ -741,6 +791,8 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
         requestStartMs = System.currentTimeMillis();
         tickCounter = 0;
         turnCancel = new CancelToken();
+        // 阶段13：主 Agent 本轮工具调用按 activeCwd 注入 explicit cwd（F18/F28）
+        agent.setToolContext(toolContextForCwd());
         // Agent 虚拟线程内跑 ReAct 循环（请求 → 权限判定 → 工具 → 回灌 → 下一轮……直到停止条件）
         agentQueue = agent.run(conversation, mode, turnCancel);
         return Command.tick(POLL_INTERVAL, t -> new StreamTickMessage());

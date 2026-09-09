@@ -37,5 +37,6 @@ public final class Builtins {
                 Kind.LOCAL, false, BuiltinLocal.skills()));
         reg.register(new Command("status", List.of(), "查看运行状态（模式/用量/工具/记忆/模型/目录）",
                 Kind.LOCAL, false, BuiltinLocal.status()));
+        reg.register(WorktreeCommand.command());
     }
 }

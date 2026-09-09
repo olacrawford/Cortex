@@ -53,6 +53,11 @@ public final class ReadFileTool implements Tool {
 
     @Override
     public Result execute(String argsJson) {
+        return execute(ToolContext.EMPTY, argsJson);
+    }
+
+    @Override
+    public Result execute(ToolContext ctx, String argsJson) {
         ReadFileArgs args;
         try {
             args = MAPPER.readValue(argsJson, ReadFileArgs.class);
@@ -64,7 +69,7 @@ public final class ReadFileTool implements Tool {
         }
         Path p;
         try {
-            p = Path.of(args.path());
+            p = ctx.resolvePath(args.path()); // 阶段13：explicit cwd 优先（F17）
         } catch (Exception e) {
             return Result.error("路径非法: " + args.path());
         }

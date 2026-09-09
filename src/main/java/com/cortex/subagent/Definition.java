@@ -17,6 +17,7 @@ import java.util.List;
  * @param permissionMode  子 Agent 权限模式；dontAsk 单独记入 dontAsk 字段、此处为 DEFAULT
  * @param dontAsk         子 Agent 专属兜底：规则未命中的 Ask 决策自动放行
  * @param background      true 时 Agent 工具忽略 run_in_background 参数、强制后台
+ * @param isolation       文件系统隔离方式："" 无隔离 / "worktree" Git Worktree 隔离（阶段13 G12）
  * @param systemPrompt    正文全文（子 Agent 系统提示）
  * @param filePath        定义文件绝对路径 / classpath uri（调试用）
  * @param source          来源层级
@@ -31,9 +32,13 @@ public record Definition(
         Mode permissionMode,
         boolean dontAsk,
         boolean background,
+        String isolation,
         String systemPrompt,
         String filePath,
         Source source) {
+
+    /** 合法的 isolation 取值（F20）。 */
+    public static final String ISOLATION_WORKTREE = "worktree";
 
     /** Fork 路径占位角色名。 */
     public static final String FORK_NAME = "__fork__";

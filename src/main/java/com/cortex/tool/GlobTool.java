@@ -58,6 +58,11 @@ public final class GlobTool implements Tool {
 
     @Override
     public Result execute(String argsJson) {
+        return execute(ToolContext.EMPTY, argsJson);
+    }
+
+    @Override
+    public Result execute(ToolContext ctx, String argsJson) {
         GlobArgs args;
         try {
             args = MAPPER.readValue(argsJson, GlobArgs.class);
@@ -67,7 +72,7 @@ public final class GlobTool implements Tool {
         if (args.pattern() == null || args.pattern().isBlank()) {
             return Result.error("缺少必填参数: pattern");
         }
-        Path root = Path.of(args.path() == null || args.path().isBlank() ? "." : args.path());
+        Path root = ctx.resolvePath(args.path() == null || args.path().isBlank() ? "." : args.path()); // 阶段13：explicit cwd 优先（F17）
         if (!Files.isDirectory(root)) {
             return Result.error("路径不存在或不是目录: " + root);
         }

@@ -73,22 +73,27 @@ public final class ToolRegistry {
     }
 
     /**
-     * 按名执行工具。未知工具、参数解析失败、执行异常一律返回 error 结果而非抛异常。
+     * 按名执行工具（带执行上下文）。未知工具、参数解析失败、执行异常一律返回 error 结果而非抛异常。
      *
      * @param argsJson 模型给出的 JSON 参数；null/空串归一为 "{}"
      */
-    public Result execute(String name, String argsJson) {
+    public Result execute(String name, ToolContext ctx, String argsJson) {
         Tool tool = tools.get(name);
         if (tool == null) {
             return Result.error("未知工具: " + name);
         }
         String args = (argsJson == null || argsJson.isBlank()) ? "{}" : argsJson;
         try {
-            return tool.execute(args);
+            return tool.execute(ctx, args);
         } catch (Exception e) {
             // 双保险：工具内部已兜底，这里防的是工具实现本身的未预期异常
             return Result.error("工具执行异常: " + e.getMessage());
         }
+    }
+
+    /** 无 explicit cwd 的执行入口（等价 EMPTY ctx）。 */
+    public Result execute(String name, String argsJson) {
+        return execute(name, ToolContext.EMPTY, argsJson);
     }
 
     /** 构造内置六个核心工具的注册中心。 */

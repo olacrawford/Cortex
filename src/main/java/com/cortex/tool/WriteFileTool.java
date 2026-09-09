@@ -54,6 +54,11 @@ public final class WriteFileTool implements Tool {
 
     @Override
     public Result execute(String argsJson) {
+        return execute(ToolContext.EMPTY, argsJson);
+    }
+
+    @Override
+    public Result execute(ToolContext ctx, String argsJson) {
         WriteFileArgs args;
         try {
             args = MAPPER.readValue(argsJson, WriteFileArgs.class);
@@ -67,7 +72,7 @@ public final class WriteFileTool implements Tool {
             return Result.error("缺少必填参数: content");
         }
         try {
-            Path p = Path.of(args.path());
+            Path p = ctx.resolvePath(args.path()); // 阶段13：explicit cwd 优先（F17）
             Path parent = p.getParent();
             if (parent != null) {
                 Files.createDirectories(parent);

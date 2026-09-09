@@ -6,6 +6,7 @@ import com.cortex.tool.Filter;
 import com.cortex.tool.Result;
 import com.cortex.tool.Tool;
 import com.cortex.tool.ToolRegistry;
+import com.cortex.worktree.WorktreeManager;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -41,12 +42,20 @@ public final class AgentTool implements Tool {
     private final AgentCatalogPort catalog;
     private final TaskManagerPort taskMgr;
     private final boolean bgEnabled;      // N6 配置开关 enableSubAgentBackground
+    private final WorktreeManager wtMgr;  // 阶段13：isolation:worktree 用；null = Worktree 未启用
     private volatile Agent parent;        // 主 Agent（provider/registry/engine/runtime 来源）
 
     public AgentTool(AgentCatalogPort catalog, TaskManagerPort taskMgr, boolean bgEnabled) {
+        this(catalog, taskMgr, bgEnabled, null);
+    }
+
+    /** 阶段13：wtMgr 允许 null（非 git 仓库等场景降级，isolation 请求报错）。 */
+    public AgentTool(AgentCatalogPort catalog, TaskManagerPort taskMgr, boolean bgEnabled,
+                     WorktreeManager wtMgr) {
         this.catalog = catalog;
         this.taskMgr = taskMgr;
         this.bgEnabled = bgEnabled;
+        this.wtMgr = wtMgr;
     }
 
     /** 主 Agent 就绪后回填（多 provider 选择 / activate 之后，T29）。 */
@@ -208,6 +217,27 @@ public final class AgentTool implements Tool {
         }
 
         // ── 启动 ──
+        // 阶段13（F21/F23）：isolation=worktree 强制前台同步，在临时 Worktree 内跑到完成
+        if (Definition.ISOLATION_WORKTREE.equals(def.isolation())) {
+            if (wtMgr == null) {
+                return Result.error("Worktree 管理器未启用（当前目录不是 git 仓库），无法隔离执行");
+            }
+            try {
+                return Result.ok(new AgentWorktreeRunner(wtMgr).executeWithWorktree(subAgent, subConv, prompt));
+            } catch (java.util.concurrent.CancellationException ce) {
+                return Result.error(Agent.NOTICE_CANCELLED);
+            } catch (Agent.MaxTurnsReachedException mt) {
+                return Result.ok((mt.lastAssistantText() == null || mt.lastAssistantText().isBlank()
+                        ? "（子 Agent 达到最大轮数。" : mt.lastAssistantText()) + "）");
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return Result.error(Agent.NOTICE_CANCELLED);
+            } catch (Exception e) {
+                return Result.error("Worktree 执行失败: "
+                        + (e.getMessage() != null ? e.getMessage() : e.toString()));
+            }
+        }
+
         if (forceBackground && bgEnabled) {
             String id = taskMgr.launch(subAgent, subConv, name, taskText);
             return Result.ok("{\"task_id\":\"" + id + "\",\"status\":\"async_launched\"}");
