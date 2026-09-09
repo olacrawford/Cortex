@@ -21,6 +21,14 @@ public interface Tool {
     boolean readOnly();
 
     /**
+     * 本工具的执行超时；默认全局 {@link ToolRegistry#DEFAULT_TIMEOUT}。
+     * Agent 工具（前台子 Agent 可同步跑到自动切后台阈值）覆盖为更大值。
+     */
+    default java.time.Duration timeout() {
+        return ToolRegistry.DEFAULT_TIMEOUT;
+    }
+
+    /**
      * 执行工具。
      *
      * @param argsJson 模型给出的 JSON 参数（注册中心已把 null/空串归一为 "{}"）

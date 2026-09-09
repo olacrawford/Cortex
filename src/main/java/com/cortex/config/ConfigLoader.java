@@ -60,7 +60,17 @@ public class ConfigLoader {
 
         AppConfig config = new AppConfig();
         config.setProviders(providers);
+        // 阶段12（N6）：SubAgent 后台开关（缺省 true——缺键时保持 null）
+        config.setEnableSubAgentBackground(getBooleanOrNull(raw, "enable_sub_agent_background"));
         return config;
+    }
+
+    /** 缺键返回 null（与 getBoolean 的 false 缺省区分：N6 默认 true 依赖 null 语义）。 */
+    private static Boolean getBooleanOrNull(Map<String, Object> map, String key) {
+        Object v = map.get(key);
+        if (v instanceof Boolean b) return b;
+        if (v instanceof String s && !s.isBlank()) return Boolean.parseBoolean(s.trim());
+        return null;
     }
 
     private static ProviderConfig parseProvider(Map<String, Object> map, int index) {

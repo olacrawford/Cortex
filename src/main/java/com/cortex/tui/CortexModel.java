@@ -62,8 +62,10 @@ import java.util.concurrent.BlockingQueue;
  * 阶段9：斜杠命令统一走 {@link CommandRegistry} 分发（handler 仅依赖 {@link com.cortex.command.Ui} 抽象），
  * 输入首字符为 "/" 时弹出补全菜单。
  * 阶段10：实现 {@link com.cortex.skill.SkillHost}，provider 就绪后把技能注册为 [skill] 标记的 PROMPT 命令。
+ * 阶段12：实现 {@link com.cortex.skill.SkillForkHost}（fork 走 SubAgent 底座 agent.LaunchFork）；
+ * 持有 task.Manager 与 Agent 工具——consumeTaskDone 注入 &lt;task-notification&gt;、子 Agent 审批转发回主 TUI。
  */
-public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.skill.SkillHost {
+public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.skill.SkillForkHost {
 
     private static final Duration POLL_INTERVAL = Duration.ofMillis(60);
     /** 工具结果摘要最多展示的行数（完整结果已回灌进对话历史）。 */
@@ -106,6 +108,13 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
     // Hook 系统（阶段11）：可空 = 未装配
     private final com.cortex.hook.HookEngine hookEngine;
 
+    // SubAgent 系统（阶段12）：后台任务管理器 + Agent 工具（可空 = 未装配）
+    private final com.cortex.task.Manager taskMgr;
+    private final com.cortex.agent.AgentTool agentTool;
+    /** 审批串行化闸：pending 弹窗之外的后续请求排队，杜绝互相覆盖丢请求。 */
+    private final Object approvalGate = new Object();
+    private final java.util.ArrayDeque<ApprovalRequest> approvalQueue = new java.util.ArrayDeque<>();
+
     private AppState state = AppState.CHAT;
     private int width = 80;
 
@@ -129,7 +138,7 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
     private boolean doneAtLeastOnce;
 
     // 人在回路（待批准）状态
-    private ApprovalRequest pending;
+    private volatile ApprovalRequest pending;
     private int approveCursor;
 
     // 权限模式（跨轮保持；初始值取自三层配置）
@@ -165,6 +174,16 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
                        SessionRuntime runtime, Writer writer, Manager memMgr,
                        String instructionText, String memoryText, Path sessionsDir,
                        SkillCatalog skillCatalog, com.cortex.hook.HookEngine hookEngine) {
+        this(providers, registry, engine, runtime, writer, memMgr, instructionText, memoryText,
+                sessionsDir, skillCatalog, hookEngine, null, null);
+    }
+
+    /** 阶段12 全参构造：额外接收后台任务管理器与 Agent 工具（均可空 = 未装配）。 */
+    public CortexModel(List<ProviderConfig> providers, ToolRegistry registry, PermissionEngine engine,
+                       SessionRuntime runtime, Writer writer, Manager memMgr,
+                       String instructionText, String memoryText, Path sessionsDir,
+                       SkillCatalog skillCatalog, com.cortex.hook.HookEngine hookEngine,
+                       com.cortex.task.Manager taskMgr, com.cortex.agent.AgentTool agentTool) {
         this.providers = providers;
         this.registry = registry;
         this.engine = engine;
@@ -176,6 +195,8 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
         this.sessionsDir = sessionsDir;
         this.skillCatalog = skillCatalog;
         this.hookEngine = hookEngine;
+        this.taskMgr = taskMgr;
+        this.agentTool = agentTool;
         // 阶段11：hook 引擎挂到 runtime，供 Agent 各 emit 点读取
         if (hookEngine != null) {
             runtime.hookEngine = hookEngine;
@@ -191,6 +212,68 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
             activate(providers.get(0));
         } else {
             this.state = AppState.PROVIDER_SELECT;
+        }
+        // 阶段12：任务完成通知消费线程 + 子 Agent 审批转发（T25/T26/F13）
+        if (taskMgr != null) {
+            taskMgr.setApprovalForwarder(this::upgradeApprovalFromSubAgent);
+            Thread.ofVirtual().name("task-done-consumer").start(this::consumeTaskDone);
+        }
+    }
+
+    // ─── SubAgent 集成（阶段12）───
+
+    /**
+     * 审批请求统一入口（F13）：主 Agent（事件流）与子 Agent（转发器）共用。
+     * pending 空闲则直接弹窗，否则排队——保证任何请求都不会被覆盖丢失。
+     */
+    private void offerApproval(ApprovalRequest req) {
+        synchronized (approvalGate) {
+            if (pending == null) {
+                pending = req;
+            } else {
+                approvalQueue.addLast(req);
+            }
+        }
+        if (program != null) {
+            program.send(new com.cortex.tui.tea.SubAgentApprovalMessage());
+        }
+    }
+
+    /** 当前裁决完成 → 从队列晋升下一个待批准请求。 */
+    private void promoteNextApproval() {
+        synchronized (approvalGate) {
+            pending = approvalQueue.pollFirst();
+        }
+        if (pending != null && program != null) {
+            program.send(new com.cortex.tui.tea.SubAgentApprovalMessage());
+        }
+    }
+
+    /**
+     * 子 Agent 审批转发器（F13）：入队弹窗并阻塞等用户三选一。
+     * 返回 empty（含中断兜底 DENY_ONCE 后）让子 Agent 回落默认路径。
+     */
+    private java.util.Optional<Outcome> upgradeApprovalFromSubAgent(ApprovalRequest req) {
+        offerApproval(req);
+        try {
+            return java.util.Optional.of(req.respond().take());
+        } catch (InterruptedException e) {
+            req.respond().offer(Outcome.DENY_ONCE); // 中断兜底解阻塞，让子 Agent 以拒绝收尾
+            Thread.currentThread().interrupt();
+            return java.util.Optional.empty();
+        }
+    }
+
+    /** 任务完成通知消费（F16/F19）：done 队列阻塞读 → &lt;task-notification&gt; 进 runtime reminder 区。 */
+    private void consumeTaskDone() {
+        try {
+            while (true) {
+                String id = taskMgr.doneQueue().take();
+                taskMgr.get(id).ifPresent(bt ->
+                        runtime.appendReminders(List.of(com.cortex.tui.Tasks.buildTaskNotification(bt))));
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt(); // 进程退出随虚拟线程终止
         }
     }
 
@@ -224,6 +307,10 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
         }
         if (msg instanceof CompactNoticeMessage notice) {
             return pushSystemMessage(notice.text());
+        }
+        if (msg instanceof com.cortex.tui.tea.SubAgentApprovalMessage) {
+            // 子 Agent 审批请求已抢占 pending：仅重绘 view 显示弹窗（F13）
+            return new UpdateResult<>(this, null);
         }
         if (msg instanceof StreamTickMessage) {
             return onStreamTick();
@@ -274,7 +361,7 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
         if (pending != null) {
             pending.respond().offer(outcome);
         }
-        pending = null;
+        promoteNextApproval();
         return new UpdateResult<>(this, null);
     }
 
@@ -283,7 +370,7 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
         if (pending != null) {
             pending.respond().offer(Outcome.DENY_ONCE);
         }
-        pending = null;
+        promoteNextApproval();
         if (turnCancel != null) {
             turnCancel.cancel();
         }
@@ -449,6 +536,10 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
         this.runtime.contextWindow = provider.effectiveContextWindow();
         this.agent = new Agent(client, registry, Prompt.VERSION, engine, runtime);
         agent.setMemory(memMgr, instructionText, memoryText);
+        // 阶段12：Agent 工具回填主 Agent 引用（provider 可重选，activate 时刷新，T29）
+        if (agentTool != null) {
+            agentTool.setParent(agent);
+        }
         if (memMgr != null) {
             memMgr.setProvider(client, provider.getModel());
         }
@@ -695,7 +786,7 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
                         committed.add(line);
                         outputs.add(Command.println(line));
                     }
-                    case AgentEvent.Approval approval -> pending = approval.request();
+                    case AgentEvent.Approval approval -> offerApproval(approval.request());
                     case AgentEvent.Done done -> {
                         outputs.addAll(finishTurn());
                         turnOver = true;
@@ -1118,6 +1209,33 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
     @Override
     public void setToolFilter(java.util.function.Predicate<String> allowed) {
         this.toolFilter = allowed;
+    }
+
+    // ─── SkillForkHost 实现（阶段12 F33/AC17）：fork 走 SubAgent 底座 ───
+
+    @Override
+    public String runSubAgent(String body, java.util.List<com.cortex.conversation.Message> seed,
+                              java.util.List<String> allowedTools, String model) {
+        if (agent == null) {
+            return "（子 Agent 未就绪：尚未连接 provider。）";
+        }
+        // model 覆盖本期不切换 provider（与 Agent 工具同策略，T17）
+        try {
+            return com.cortex.agent.LaunchFork.launch(agent, seed, body, allowedTools, new CancelToken());
+        } catch (Agent.MaxTurnsReachedException mt) {
+            return mt.lastAssistantText() == null || mt.lastAssistantText().isBlank()
+                    ? "（子 Agent 达到最大轮数。）" : mt.lastAssistantText();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return "（子 Agent 被中断。）";
+        } catch (Exception e) {
+            return "（子 Agent 执行失败：" + (e.getMessage() != null ? e.getMessage() : e.toString()) + "）";
+        }
+    }
+
+    @Override
+    public java.util.List<com.cortex.conversation.Message> snapshotParentMessages() {
+        return conversation.getMessages();
     }
 
     @Override

@@ -61,6 +61,12 @@ public final class ToolRegistry {
         return t != null && t.readOnly();
     }
 
+    /** 按工具取执行超时（未知工具回退全局默认）；Agent.await 的 per-tool 截止时间用。 */
+    public Duration timeoutOf(String name) {
+        Tool t = tools.get(name);
+        return t == null ? DEFAULT_TIMEOUT : t.timeout();
+    }
+
     /** 已注册工具数量（/status 用，O(1)）。 */
     public int count() {
         return tools.size();

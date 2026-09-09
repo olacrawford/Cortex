@@ -83,6 +83,20 @@ public final class Agent {
     private String instructionText = "";    // 项目指令（custom-instructions 模块）
     private String memoryText = "";         // 长期记忆索引（long-term-memory 模块）
 
+    // ─── 阶段12 SubAgent 扩展（子 Agent 专用；主 Agent 均取默认值）───
+    private final String systemPromptOverride;   // 非空时覆盖默认系统提示（角色正文）
+    private final int maxTurns;                  // 最大迭代轮数；0 = MAX_ITERATIONS
+    private final Mode subAgentMode;             // 子 Agent 权限模式
+    private final boolean subAgentModeSet;       // 区分「未设置」与 DEFAULT
+    private final boolean dontAsk;               // 规则未命中的 Ask 决策自动放行
+    private final ApprovalUpgrader approvalUpgrader; // 审批升级到父 TUI 的回调（可空）
+    private final java.util.Set<String> allowedTools; // 工具白名单；空 = 不收窄（F30）
+    private final boolean forkContext;           // Fork/skill-fork 子 Agent 标记（嵌套阻断 QuerySource）
+    /** 当前 run/runToCompletion 的对话；Agent 工具 fork 时取父消息用（F22）。 */
+    private volatile ConversationManager activeConv;
+    /** 工具执行现场的调用方 Agent（QuerySource 嵌套检测，F24）；executeTool 包装器设置/清理。 */
+    private static final ThreadLocal<Agent> CURRENT_CALLER = new ThreadLocal<>();
+
     public Agent(LlmClient client, ToolRegistry registry, String version, PermissionEngine engine) {
         this(client, registry, version, engine, SessionRuntime.empty(200000));
     }
@@ -94,6 +108,165 @@ public final class Agent {
         this.version = version == null ? "" : version;
         this.engine = engine;
         this.runtime = runtime;
+        this.systemPromptOverride = null;
+        this.maxTurns = 0;
+        this.subAgentMode = Mode.DEFAULT;
+        this.subAgentModeSet = false;
+        this.dontAsk = false;
+        this.approvalUpgrader = null;
+        this.allowedTools = java.util.Set.of();
+        this.forkContext = false;
+    }
+
+    private Agent(Builder b) {
+        this.client = b.client;
+        this.registry = b.registry;
+        this.version = b.version == null ? "" : b.version;
+        this.engine = b.engine;
+        this.runtime = b.runtime;
+        this.systemPromptOverride = b.systemPrompt;
+        this.maxTurns = Math.max(0, b.maxTurns);
+        this.subAgentMode = b.permissionMode;
+        this.subAgentModeSet = b.permissionModeSet;
+        this.dontAsk = b.dontAsk;
+        this.approvalUpgrader = b.approvalUpgrader;
+        this.allowedTools = java.util.Set.copyOf(b.allowedTools);
+        this.forkContext = b.forkContext;
+    }
+
+    /** 子 Agent 构造器（阶段12）：主 Agent 沿用既有构造函数，不受影响。 */
+    public static Builder builder(LlmClient client, ToolRegistry registry, String version,
+                                  PermissionEngine engine, SessionRuntime runtime) {
+        return new Builder(client, registry, version, engine, runtime);
+    }
+
+    /** Builder 选项：既有五参 + 阶段12 新增 systemPrompt/maxTurns/permissionMode/dontAsk/approvalUpgrader/allowedTools/forkContext。 */
+    public static final class Builder {
+        private final LlmClient client;
+        private final ToolRegistry registry;
+        private final String version;
+        private final PermissionEngine engine;
+        private final SessionRuntime runtime;
+        private String systemPrompt;
+        private int maxTurns;
+        private Mode permissionMode = Mode.DEFAULT;
+        private boolean permissionModeSet;
+        private boolean dontAsk;
+        private ApprovalUpgrader approvalUpgrader;
+        private java.util.Set<String> allowedTools = java.util.Set.of();
+        private boolean forkContext;
+
+        private Builder(LlmClient client, ToolRegistry registry, String version,
+                        PermissionEngine engine, SessionRuntime runtime) {
+            this.client = client;
+            this.registry = registry;
+            this.version = version;
+            this.engine = engine;
+            this.runtime = runtime;
+        }
+
+        /** 子 Agent 角色系统提示；非空时覆盖默认主 Agent 系统提示（F10）。 */
+        public Builder systemPrompt(String text) {
+            this.systemPrompt = text;
+            return this;
+        }
+
+        /** 最大迭代轮数；&lt;=0 表示用全局 MAX_ITERATIONS。 */
+        public Builder maxTurns(int n) {
+            this.maxTurns = n;
+            return this;
+        }
+
+        /** 子 Agent 启动权限模式（F10）；未设置时 runToCompletion 用 DEFAULT。 */
+        public Builder permissionMode(Mode m) {
+            this.permissionMode = m;
+            this.permissionModeSet = true;
+            return this;
+        }
+
+        /** dontAsk 兜底：规则未命中的 Ask 决策自动放行（F4/F12）。 */
+        public Builder dontAsk(boolean enabled) {
+            this.dontAsk = enabled;
+            return this;
+        }
+
+        /** 审批升级回调：返回非 empty Outcome 即接管，empty 则走默认 emit Approval 路径（F13）。 */
+        public Builder approvalUpgrader(ApprovalUpgrader fn) {
+            this.approvalUpgrader = fn;
+            return this;
+        }
+
+        /** 工具白名单（F30 过滤产物）；空集合 = 不收窄。 */
+        public Builder allowedTools(java.util.Set<String> allowed) {
+            this.allowedTools = allowed == null ? java.util.Set.of() : allowed;
+            return this;
+        }
+
+        /** Fork/skill-fork 子 Agent 标记：嵌套阻断 QuerySource 闸用（F24）。 */
+        public Builder forkContext(boolean fork) {
+            this.forkContext = fork;
+            return this;
+        }
+
+        public Agent build() {
+            return new Agent(this);
+        }
+    }
+
+    // ─── 阶段12：子 Agent 装配辅助（AgentTool / LaunchFork 同包使用）───
+
+    /** 共享的 LLM 客户端（基础设施共享，F11）。 */
+    LlmClient client() {
+        return client;
+    }
+
+    ToolRegistry registry() {
+        return registry;
+    }
+
+    String version() {
+        return version;
+    }
+
+    PermissionEngine engine() {
+        return engine;
+    }
+
+    SessionRuntime runtime() {
+        return runtime;
+    }
+
+    String instructionText() {
+        return instructionText;
+    }
+
+    String memoryText() {
+        return memoryText;
+    }
+
+    /** 是否 Fork/skill-fork 子 Agent（嵌套阻断 QuerySource 闸）。 */
+    boolean isForkContext() {
+        return forkContext;
+    }
+
+    /** 当前 run 的对话（Agent 工具构造 Fork 子对话时取父消息；无 run 时 null）。 */
+    ConversationManager currentConversation() {
+        return activeConv;
+    }
+
+    /** 工具执行现场的调用方 Agent；非 Agent 循环线程返回 null。 */
+    static Agent currentCaller() {
+        return CURRENT_CALLER.get();
+    }
+
+    /** 以本 Agent 为调用方执行工具（QuerySource 闸的数据来源）；包装 registry.execute。 */
+    private Result executeAsCaller(com.cortex.llm.ToolCall call) {
+        CURRENT_CALLER.set(this);
+        try {
+            return registry.execute(call.name(), call.args());
+        } finally {
+            CURRENT_CALLER.remove();
+        }
     }
 
     /** 注入记忆管理器与系统提示的指令 / 记忆文本（ch09；由 Cortex 装配时调用）。 */
@@ -110,6 +283,7 @@ public final class Agent {
      */
     public BlockingQueue<AgentEvent> run(ConversationManager conv, Mode mode, CancelToken cancel) {
         BlockingQueue<AgentEvent> out = new LinkedBlockingQueue<>();
+        activeConv = conv; // 阶段12：Agent 工具 fork 时读取父消息（F22）
         Thread.ofVirtual().name("agent-loop").start(() -> {
             runLock.lock();
             try {
@@ -211,7 +385,7 @@ public final class Agent {
         // 环境信息（不缓存）与稳定系统提示（可缓存）在 run 起始构造一次，跨轮复用（F2/F3/N1）
         String envText = Environment.gather(this.version, "").render();
         String sys = Prompt.buildSystemPrompt(instructionText, memoryText);
-        List<ToolDef> defs = mode == Mode.PLAN ? registry.readOnlyDefinitions() : registry.definitions();
+        List<ToolDef> defs = definitionsFor(mode);
 
         int unknownRun = 0;
         for (int iter = 1; iter <= MAX_ITERATIONS; iter++) {
@@ -289,6 +463,122 @@ public final class Agent {
         // 循环走完 = 触达迭代上限（F2-2）
         emit(out, cancel, new AgentEvent.Notice(NOTICE_MAX_ITER));
         ensureAssistantTail(conv, NOTICE_MAX_ITER);
+    }
+
+    // ─── 阶段12：子 Agent「跑到底」循环（F9/F10/G5）───
+
+    /** 触达 maxTurns 时抛出；lastAssistantText 供调用方（Manager）回灌部分结果。 */
+    public static final class MaxTurnsReachedException extends RuntimeException {
+        private final String lastAssistantText;
+
+        public MaxTurnsReachedException(String message, String lastAssistantText) {
+            super(message);
+            this.lastAssistantText = lastAssistantText;
+        }
+
+        public String lastAssistantText() {
+            return lastAssistantText;
+        }
+    }
+
+    /**
+     * 子 Agent 的非交互「跑到底」执行（G5）：task 作为 user 消息追加（空串跳过——Fork 路径已预装填），
+     * 复用主循环的 roundRequest / streamOnce / executeBatched / 紧急压缩 / hook 分派（F9），
+     * 差异：事件写入调用方提供的 events 队列（可 null）；不注入 plan reminder；不触发记忆更新；
+     * 结束即返回末尾 assistant 文本；触达 maxTurns 抛 {@link MaxTurnsReachedException}；
+     * 取消抛 {@link java.util.concurrent.CancellationException}；流出错/压缩失败抛 RuntimeException。
+     * 权限模式取 Builder.permissionMode（未设置则 DEFAULT），并叠加 dontAsk / approvalUpgrader（F12）。
+     */
+    public String runToCompletion(CancelToken cancel, ConversationManager conv, String task,
+                                  BlockingQueue<AgentEvent> events) throws InterruptedException {
+        if (task != null && !task.isBlank()) {
+            conv.addUserMessage(task);
+        }
+        activeConv = conv;
+        Mode mode = subAgentModeSet ? subAgentMode : Mode.DEFAULT;
+        String envText = Environment.gather(this.version, "").render();
+        // systemPrompt 非空 = 角色 prompt 覆盖（定义式）；空 = 继承主 Agent 系统提示（Fork，N2 缓存一致）
+        String sys = systemPromptOverride == null || systemPromptOverride.isBlank()
+                ? Prompt.buildSystemPrompt(instructionText, memoryText)
+                : systemPromptOverride;
+        List<ToolDef> defs = definitionsFor(mode);
+        int turns = maxTurns > 0 ? maxTurns : MAX_ITERATIONS;
+
+        int unknownRun = 0;
+        for (int iter = 1; iter <= turns; iter++) {
+            if (cancel.isCancelled()) {
+                ensureAssistantTail(conv, NOTICE_CANCELLED);
+                throw new java.util.concurrent.CancellationException();
+            }
+            emit(events, cancel, new AgentEvent.Iter(iter));
+
+            StreamOutcome once;
+            boolean emergencyRetried = false;
+            try {
+                once = roundRequest(conv, sys, envText, defs, "", mode, cancel, events);
+            } catch (com.cortex.compact.CompactException ce) {
+                ensureAssistantTail(conv, NOTICE_STREAM_ERR);
+                throw new RuntimeException("子 Agent 压缩失败: " + ce.getMessage(), ce);
+            } catch (StreamException se) {
+                if (se.getCause() instanceof PromptTooLongException && !emergencyRetried) {
+                    once = emergencyCompact(conv, sys, envText, defs, "", mode, cancel, events, se);
+                    if (once == null) {
+                        throw new RuntimeException("子 Agent 紧急压缩后仍无法继续");
+                    }
+                    emergencyRetried = true;
+                } else {
+                    ensureAssistantTail(conv, NOTICE_STREAM_ERR);
+                    throw new RuntimeException("子 Agent 流中断: " + se.getMessage(), se);
+                }
+            }
+
+            if (once.failed()) {
+                ensureAssistantTail(conv, cancel.isCancelled() ? NOTICE_CANCELLED : NOTICE_STREAM_ERR);
+                if (cancel.isCancelled()) {
+                    throw new java.util.concurrent.CancellationException();
+                }
+                throw new RuntimeException("子 Agent 请求失败");
+            }
+
+            // 自然完成：无工具调用的纯文本即最终答复（G5）
+            if (once.calls().isEmpty()) {
+                String finalText = ensureFinal(events, cancel, once.text());
+                conv.addAssistantMessage(finalText);
+                // Stop 事件：与主循环同点位（hook 调度延续，F9；子 Agent 不触发记忆更新）
+                dispatchHook(Event.STOP, mode, cancel, Map.of("iter", iter));
+                return finalText;
+            }
+
+            conv.addAssistantWithToolCalls(once.text(), once.calls());
+            unknownRun = allUnknown(once.calls()) ? unknownRun + 1 : 0;
+            BatchOutcome batch = executeBatched(once.calls(), mode, cancel, events);
+            conv.addToolResults(batch.results());
+            if (!batch.completed()) {
+                ensureAssistantTail(conv, NOTICE_CANCELLED);
+                throw new java.util.concurrent.CancellationException();
+            }
+            if (unknownRun >= MAX_UNKNOWN_RUN) {
+                emit(events, cancel, new AgentEvent.Notice(NOTICE_UNKNOWN_TOOLS));
+                ensureAssistantTail(conv, NOTICE_UNKNOWN_TOOLS);
+                throw new RuntimeException("子 Agent 连续请求未注册工具，已停止");
+            }
+        }
+        // 触达 maxTurns（F9）：历史收尾后抛异常，末尾 assistant 文本随异常带回
+        ensureAssistantTail(conv, NOTICE_MAX_ITER);
+        String last = lastAssistantText(conv);
+        throw new MaxTurnsReachedException("子 Agent 达到最大轮数 " + turns, last);
+    }
+
+    /** 末尾 assistant 消息文本（无则空串）。 */
+    private static String lastAssistantText(ConversationManager conv) {
+        List<Message> msgs = conv.getMessages();
+        for (int i = msgs.size() - 1; i >= 0; i--) {
+            if (msgs.get(i).getRole() == Message.Role.ASSISTANT) {
+                String c = msgs.get(i).getContent();
+                return c == null ? "" : c;
+            }
+        }
+        return "";
     }
 
     /**
@@ -397,6 +687,22 @@ public final class Agent {
             }
         }
         return "";
+    }
+
+    // ─── 工具定义收窄（阶段12 F30/F31）───
+
+    /** 按模式 + allowedTools 白名单导出工具定义；主 Agent（白名单空）与原行为完全一致（N1）。 */
+    private List<ToolDef> definitionsFor(Mode mode) {
+        List<ToolDef> base = mode == Mode.PLAN ? registry.readOnlyDefinitions() : registry.definitions();
+        if (allowedTools.isEmpty()) {
+            return base;
+        }
+        return base.stream().filter(d -> allowedTools.contains(d.name())).toList();
+    }
+
+    /** 工具调用闸：不在白名单内的调用不执行、直接回灌错误（模型越权幻觉兜底）。 */
+    private boolean toolAllowed(String name) {
+        return allowedTools.isEmpty() || allowedTools.contains(name);
     }
 
     // ─── 流式收集（双路）───
@@ -568,12 +874,13 @@ public final class Agent {
         }
         List<Future<Result>> futures = new ArrayList<>();
         for (int k = from; k < to; k++) {
-            if (hookBlocked[k - from] || checks[k - from].decision() == Decision.DENY) {
+            if (hookBlocked[k - from] || checks[k - from].decision() == Decision.DENY
+                    || !toolAllowed(calls.get(k).name())) {
                 futures.add(null); // 被拒项不执行
                 continue;
             }
             ToolCall c = calls.get(k);
-            futures.add(executor.submit(() -> registry.execute(c.name(), c.args())));
+            futures.add(executor.submit(() -> executeAsCaller(c)));
         }
         // End 事件按调用序逐个落 scrollback；只写各自下标，无竞争（N6）
         for (int k = from; k < to; k++) {
@@ -583,11 +890,13 @@ public final class Agent {
                 r = Result.error(hookText[k - from]);
             } else if (cr.decision() == Decision.DENY) {
                 r = Result.error(cr.reason());
+            } else if (!toolAllowed(calls.get(k).name())) {
+                r = Result.error("工具未授权（子 Agent 工具白名单不含 " + calls.get(k).name() + "）");
             } else if (cancel.isCancelled()) {
                 futures.get(k - from).cancel(true);
                 r = Result.error(NOTICE_CANCELLED);
             } else {
-                r = await(futures.get(k - from), cancel);
+                r = await(futures.get(k - from), cancel, calls.get(k).name());
             }
             results[k] = new ToolResult(calls.get(k).id(), r.content(), r.isError());
             // PostToolUse：拿到 result 之后、PhaseEnd emit 之前（F9；被 Deny/拦截的也触发）
@@ -625,6 +934,12 @@ public final class Agent {
                 yield Result.error(cr.reason());
             }
             case ASK -> {
+                // 子 Agent dontAsk 兜底（F12-②）：黑名单/沙箱/规则已过，Ask 类直接放行
+                if (dontAsk) {
+                    emit(out, cancel, toolEvent(call, Phase.START, "", false));
+                    Future<Result> autoAllow = executor.submit(() -> executeAsCaller(call));
+                    yield await(autoAllow, cancel, call.name());
+                }
                 Outcome o = requestApproval(call, cr.reason(), cancel, out);
                 if (o == null) {
                     results[i] = new ToolResult(call.id(), NOTICE_CANCELLED, true);
@@ -642,18 +957,21 @@ public final class Agent {
                     yield Result.error("用户拒绝本次调用");
                 } else {
                     emit(out, cancel, toolEvent(call, Phase.START, "", false));
-                    Future<Result> future = executor.submit(() -> registry.execute(call.name(), call.args()));
-                    yield await(future, cancel);
+                    Future<Result> future = executor.submit(() -> executeAsCaller(call));
+                    yield await(future, cancel, call.name());
                 }
             }
             case ALLOW -> {
                 emit(out, cancel, toolEvent(call, Phase.START, "", false));
-                Future<Result> future = executor.submit(() -> registry.execute(call.name(), call.args()));
-                yield await(future, cancel);
+                Future<Result> future = executor.submit(() -> executeAsCaller(call));
+                yield await(future, cancel, call.name());
             }
         };
         if (r == null) {
             return -1; // 人在回路等待中被取消
+        }
+        if (!toolAllowed(call.name())) {
+            r = Result.error("工具未授权（子 Agent 工具白名单不含 " + call.name() + "）");
         }
         results[i] = new ToolResult(call.id(), r.content(), r.isError());
         // PostToolUse：拿到 result 之后、PhaseEnd emit 之前（F9）
@@ -674,6 +992,9 @@ public final class Agent {
 
     /**
      * 第五层人在回路（F8）：发 Approval 事件并阻塞等 TUI 回传用户三选一。
+     * 阶段12（F13）：子 Agent 可经 {@code approvalUpgrader} 把请求升级到父 TUI——返回非 empty
+     * Outcome 即接管本次判定；empty 则回落默认 emit 路径。
+     * 取消兜底：cancel 触发时自动 offer DENY_ONCE 解阻塞（TaskStop 停后台子 Agent 依赖此闸）。
      * 返回 null 表示已取消（中断或 per-turn cancel 已触发）。
      */
     private Outcome requestApproval(ToolCall call, String reason, CancelToken cancel,
@@ -682,11 +1003,18 @@ public final class Agent {
             return null;
         }
         BlockingQueue<Outcome> respond = new ArrayBlockingQueue<>(1);
+        ApprovalRequest request = new ApprovalRequest(call.name(), preview(call.args()), reason, respond);
+        cancel.onCancel(() -> respond.offer(Outcome.DENY_ONCE));
         // Notification：权限 Ask 弹出审批时（F9）
         dispatchHook(Event.NOTIFICATION, null, cancel,
                 Map.of("kind", "approval", "detail", call.name()));
-        if (!emit(out, cancel, new AgentEvent.Approval(
-                new ApprovalRequest(call.name(), preview(call.args()), reason, respond)))) {
+        if (approvalUpgrader != null) {
+            java.util.Optional<Outcome> upgraded = approvalUpgrader.upgrade(request);
+            if (upgraded.isPresent()) {
+                return upgraded.get();
+            }
+        }
+        if (!emit(out, cancel, new AgentEvent.Approval(request))) {
             return null;
         }
         try {
@@ -697,9 +1025,9 @@ public final class Agent {
         }
     }
 
-    /** per-tool 超时 + 取消感知的结果等待。 */
-    private Result await(Future<Result> future, CancelToken cancel) throws InterruptedException {
-        long deadline = System.currentTimeMillis() + ToolRegistry.DEFAULT_TIMEOUT.toMillis();
+    /** per-tool 超时 + 取消感知的结果等待；工具自身的 timeout() 覆盖全局默认。 */
+    private Result await(Future<Result> future, CancelToken cancel, String toolName) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + registry.timeoutOf(toolName).toMillis();
         while (true) {
             try {
                 return future.get(100, TimeUnit.MILLISECONDS);
@@ -725,10 +1053,13 @@ public final class Agent {
 
     // ─── 辅助 ───
 
-    /** 发事件；per-turn 取消已触发时返回 false（调用方据此提前收尾）。 */
+    /** 发事件；per-turn 取消已触发时返回 false（调用方据此提前收尾）。事件总线为 null（子 Agent 无订阅方）时只反映取消态。 */
     private static boolean emit(BlockingQueue<AgentEvent> bus, CancelToken cancel, AgentEvent event) {
         if (cancel.isCancelled()) {
             return false;
+        }
+        if (bus == null) {
+            return true;
         }
         try {
             bus.put(event);

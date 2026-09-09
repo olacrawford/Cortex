@@ -77,6 +77,17 @@ public class Cortex {
             // ch11：Hook 引擎（hooks.yaml 双层加载，加载错误只 stderr 不阻断启动）
             com.cortex.hook.HookEngine hookEngine = com.cortex.hook.HookLoader.load(root);
 
+            // ch12：SubAgent 角色编目 + 后台任务管理器 + 5 个新工具（Agent/TaskList/TaskGet/TaskStop/SendMessage）
+            com.cortex.subagent.Catalog subAgentCatalog = com.cortex.subagent.Catalog.load(root);
+            com.cortex.task.Manager taskMgr = new com.cortex.task.Manager();
+            registry.register(new com.cortex.task.TaskListTool(taskMgr));
+            registry.register(new com.cortex.task.TaskGetTool(taskMgr));
+            registry.register(new com.cortex.task.TaskStopTool(taskMgr));
+            registry.register(new com.cortex.task.SendMessageTool(taskMgr));
+            com.cortex.agent.AgentTool agentTool = new com.cortex.agent.AgentTool(
+                    subAgentCatalog, taskMgr, config.effectiveEnableSubAgentBackground());
+            registry.register(agentTool);
+
             PermissionEngine engine = PermissionEngine.create(root);
             // ch08：会话级上下文管理状态（决策账本 / 文件追踪 / 熔断计数 / 会话目录），跨 run 持有
             SessionContext session = SessionContext.create(root);
@@ -91,7 +102,7 @@ public class Cortex {
 
             CortexModel model = new CortexModel(config.getProviders(), registry, engine, runtime,
                     writer, memMgr, instructionText, memoryText, root.resolve(".cortex/sessions"),
-                    skillCatalog, hookEngine);
+                    skillCatalog, hookEngine, taskMgr, agentTool);
             // ch10：远程安装工具 → 装完 reload catalog 并重新注册斜杠命令，无需重启
             registry.register(new InstallSkillTool(skillCatalog, root,
                     Path.of(System.getProperty("user.home"), ".cortex", "skills"),
