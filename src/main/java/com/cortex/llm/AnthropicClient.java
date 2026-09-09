@@ -132,7 +132,11 @@ public class AnthropicClient implements LlmClient {
                 queue.put(end != null ? end : new StreamEvent.StreamEnd("stop", (int) inputTokens, 0));
             } catch (Exception e) {
                 try {
-                    queue.put(new StreamEvent.Error(e.getMessage() != null ? e.getMessage() : e.toString()));
+                    Throwable cause = PromptTooLongException.isPromptTooLong(e)
+                            ? new PromptTooLongException(e)
+                            : e;
+                    queue.put(new StreamEvent.Error(
+                            cause.getMessage() != null ? cause.getMessage() : cause.toString(), cause));
                 } catch (InterruptedException ignored) {}
             }
         });

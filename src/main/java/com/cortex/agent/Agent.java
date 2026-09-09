@@ -1,8 +1,12 @@
 package com.cortex.agent;
 
+import com.cortex.compact.CompactConstants;
+import com.cortex.compact.ContextCompactor;
+import com.cortex.compact.Token;
 import com.cortex.conversation.ConversationManager;
 import com.cortex.conversation.Message;
 import com.cortex.llm.LlmClient;
+import com.cortex.llm.PromptTooLongException;
 import com.cortex.llm.Request;
 import com.cortex.llm.StreamEvent;
 import com.cortex.llm.SystemPrompt;
@@ -18,11 +22,16 @@ import com.cortex.prompt.Prompt;
 import com.cortex.prompt.Reminder;
 import com.cortex.tool.Result;
 import com.cortex.tool.ToolRegistry;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutionException;
@@ -32,11 +41,15 @@ import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * ReAct 循环编排（F1/F2）：带工具发起请求 → 流式收集 → 有工具调用则执行并回灌，
  * 进入下一轮；纯文本即最终答复，循环结束。停止条件：自然完成、迭代上限（兜底）、
  * 用户取消、连续未知工具、流出错。任何终止路径都保证对话历史配对合法（F6）。
+ * <p>
+ * ch08：主循环集成上下文管理（每轮请求前 manageContext）、ReadFile 文件追踪、
+ * PTL 紧急压缩 + 一次性重试、手动 /compact 的 runForceCompact 互斥。
  */
 public final class Agent {
 
@@ -59,33 +72,68 @@ public final class Agent {
     private final ToolRegistry registry;
     private final String version;
     private final PermissionEngine engine;
+    private final SessionRuntime runtime;
+    private final ReentrantLock runLock = new ReentrantLock();
 
     public Agent(LlmClient client, ToolRegistry registry, String version, PermissionEngine engine) {
+        this(client, registry, version, engine, SessionRuntime.empty(200000));
+    }
+
+    public Agent(LlmClient client, ToolRegistry registry, String version, PermissionEngine engine,
+                 SessionRuntime runtime) {
         this.client = client;
         this.registry = registry;
         this.version = version == null ? "" : version;
         this.engine = engine;
+        this.runtime = runtime;
     }
 
     /**
      * 执行 Agent Loop，返回事件队列。内部用虚拟线程驱动整条循环；
      * 订阅方（TUI）逐条 poll，直到 Done（任何结束路径的终止哨兵）。
+     * 入口先持有 runLock，保证 run 与 runForceCompact 不并发触发 manageContext。
      */
     public BlockingQueue<AgentEvent> run(ConversationManager conv, Mode mode, CancelToken cancel) {
         BlockingQueue<AgentEvent> out = new LinkedBlockingQueue<>();
         Thread.ofVirtual().name("agent-loop").start(() -> {
+            runLock.lock();
             try {
                 loop(conv, mode, cancel, out);
             } catch (Exception e) {
                 // 未预期异常：发 Failed（正常路径已发过的会由 TUI 幂等处理）
                 putDirect(out, new AgentEvent.Failed(e.getMessage() != null ? e.getMessage() : e.toString()));
             } finally {
+                runLock.unlock();
                 // 终止哨兵：绕过 emit 的取消检查，保证 TUI 总能收到结束信号回空闲态
                 putDirect(out, new AgentEvent.Done());
             }
         });
         return out;
     }
+
+    /** 手动 /compact 专用：等主循环空闲后执行一次 forceCompact，返回前后 token。 */
+    public ForceCompactResult runForceCompact(ConversationManager conv, List<ToolDef> defs) {
+        runLock.lock();
+        try {
+            long anchor = runtime.getUsageAnchor();
+            int anchorLen = runtime.getAnchorMsgLen();
+            int cw = runtime.contextWindow;
+            long est = Token.estimateTokens(anchor, conv.getMessages(), anchorLen);
+            ContextCompactor.Input in = new ContextCompactor.Input(conv, client, cw, defs,
+                    runtime.replacement, runtime.recovery, runtime.autoTracking, runtime.session,
+                    anchor, anchorLen, est, ContextCompactor.TriggerKind.MANUAL);
+            try {
+                ContextCompactor.CompactMsg msg = ContextCompactor.manage(in);
+                return new ForceCompactResult(msg.beforeTokens(), msg.afterTokens(), null);
+            } catch (com.cortex.compact.CompactException e) {
+                return new ForceCompactResult(0, 0, e);
+            }
+        } finally {
+            runLock.unlock();
+        }
+    }
+
+    public record ForceCompactResult(long before, long after, Throwable error) {}
 
     // ─── ReAct 主循环 ───
 
@@ -110,8 +158,28 @@ public final class Agent {
                 reminder = Reminder.plan(full);
             }
 
-            // 请求：流式收集本轮响应（双路——文本实时转发 + 完整调用收集）
-            StreamOutcome once = streamOnce(conv, sys, envText, defs, reminder, cancel, out);
+            StreamOutcome once;
+            boolean emergencyRetried = false;
+            try {
+                once = roundRequest(conv, sys, envText, defs, reminder, cancel, out);
+            } catch (com.cortex.compact.CompactException ce) {
+                emit(out, cancel, new AgentEvent.Failed(ce.getMessage()));
+                ensureAssistantTail(conv, NOTICE_STREAM_ERR);
+                return;
+            } catch (StreamException se) {
+                if (se.getCause() instanceof PromptTooLongException && !emergencyRetried) {
+                    once = emergencyCompact(conv, sys, envText, defs, reminder, cancel, out, se);
+                    if (once == null) {
+                        return;
+                    }
+                    emergencyRetried = true;
+                } else {
+                    emit(out, cancel, new AgentEvent.Failed(se.getMessage()));
+                    ensureAssistantTail(conv, NOTICE_STREAM_ERR);
+                    return;
+                }
+            }
+
             if (once.failed()) {
                 // 取消优先于流错误
                 ensureAssistantTail(conv, cancel.isCancelled() ? NOTICE_CANCELLED : NOTICE_STREAM_ERR);
@@ -151,6 +219,90 @@ public final class Agent {
         ensureAssistantTail(conv, NOTICE_MAX_ITER);
     }
 
+    /**
+     * 紧急压缩路径：先发 BEFORE_EMERGENCY，manage(EMERGENCY) 后发 AFTER_EMERGENCY；
+     * 重置锚点并重估，能塞下则重试一次 streamOnce，否则上抛。
+     */
+    private StreamOutcome emergencyCompact(ConversationManager conv, String sys, String envText,
+                                           List<ToolDef> defs, String reminder, CancelToken cancel,
+                                           BlockingQueue<AgentEvent> out, StreamException firstErr)
+            throws InterruptedException {
+        emit(out, cancel, new CompactEvent(CompactPhase.BEFORE_EMERGENCY, 0, 0, null));
+        ContextCompactor.CompactMsg msg;
+        try {
+            long anchor = runtime.getUsageAnchor();
+            int anchorLen = runtime.getAnchorMsgLen();
+            int cw = runtime.contextWindow;
+            long est = Token.estimateTokens(anchor, conv.getMessages(), anchorLen);
+            ContextCompactor.Input in = new ContextCompactor.Input(conv, client, cw, defs,
+                    runtime.replacement, runtime.recovery, runtime.autoTracking, runtime.session,
+                    anchor, anchorLen, est, ContextCompactor.TriggerKind.EMERGENCY);
+            msg = ContextCompactor.manage(in);
+        } catch (com.cortex.compact.CompactException ce) {
+            emit(out, cancel, new CompactEvent(CompactPhase.AFTER_EMERGENCY, 0, 0, ce));
+            emit(out, cancel, new AgentEvent.Failed(ce.getMessage()));
+            ensureAssistantTail(conv, NOTICE_STREAM_ERR);
+            return null;
+        }
+        runtime.updateAnchor(0L, 0);
+        long est2 = Token.estimateTokens(0L, conv.getMessages(), 0);
+        emit(out, cancel, new CompactEvent(CompactPhase.AFTER_EMERGENCY,
+                msg.beforeTokens(), msg.afterTokens(), null));
+        if (est2 >= runtime.contextWindow - CompactConstants.MANUAL_SAFETY_MARGIN) {
+            emit(out, cancel, new AgentEvent.Failed(firstErr.getMessage()));
+            ensureAssistantTail(conv, NOTICE_STREAM_ERR);
+            return null;
+        }
+        try {
+            return roundRequest(conv, sys, envText, defs, reminder, cancel, out);
+        } catch (com.cortex.compact.CompactException ce) {
+            emit(out, cancel, new AgentEvent.Failed(ce.getMessage()));
+            ensureAssistantTail(conv, NOTICE_STREAM_ERR);
+            return null;
+        } catch (StreamException se) {
+            emit(out, cancel, new AgentEvent.Failed(se.getMessage()));
+            ensureAssistantTail(conv, NOTICE_STREAM_ERR);
+            return null;
+        }
+    }
+
+    /** 每轮请求前：manageContext(AUTO) + streamOnce + 更新 usage 锚点。 */
+    private StreamOutcome roundRequest(ConversationManager conv, String sys, String envText,
+                                       List<ToolDef> defs, String reminder, CancelToken cancel,
+                                       BlockingQueue<AgentEvent> out)
+            throws InterruptedException, com.cortex.compact.CompactException, StreamException {
+        long anchor = runtime.getUsageAnchor();
+        int anchorLen = runtime.getAnchorMsgLen();
+        int cw = runtime.contextWindow;
+        long est = Token.estimateTokens(anchor, conv.getMessages(), anchorLen);
+        boolean willSummarize = cw > CompactConstants.SUMMARY_RESERVE + CompactConstants.AUTO_SAFETY_MARGIN
+                && est >= cw - CompactConstants.SUMMARY_RESERVE - CompactConstants.AUTO_SAFETY_MARGIN;
+        if (willSummarize) {
+            emit(out, cancel, new CompactEvent(CompactPhase.BEFORE_AUTO, 0, 0, null));
+        }
+        ContextCompactor.Input in = new ContextCompactor.Input(conv, client, cw, defs,
+                runtime.replacement, runtime.recovery, runtime.autoTracking, runtime.session,
+                anchor, anchorLen, est, ContextCompactor.TriggerKind.AUTO);
+        ContextCompactor.CompactMsg msg;
+        try {
+            msg = ContextCompactor.manage(in);
+        } catch (com.cortex.compact.CompactException e) {
+            if (willSummarize) {
+                emit(out, cancel, new CompactEvent(CompactPhase.AFTER_AUTO, est, est, e));
+            }
+            throw e;
+        }
+        if (willSummarize) {
+            emit(out, cancel, new CompactEvent(CompactPhase.AFTER_AUTO,
+                    msg.beforeTokens(), msg.afterTokens(), null));
+        }
+        StreamOutcome once = streamOnce(conv, sys, envText, defs, reminder, cancel, out);
+        if (once.usage() != null) {
+            runtime.updateAnchor(Token.usageAnchor(once.usage()), conv.size());
+        }
+        return once;
+    }
+
     // ─── 流式收集（双路）───
 
     private record StreamOutcome(String text, List<ToolCall> calls, com.cortex.llm.Usage usage, boolean failed) {}
@@ -159,7 +311,7 @@ public final class Agent {
     private StreamOutcome streamOnce(ConversationManager conv, String sys, String envText,
                                      List<ToolDef> defs, String reminder,
                                      CancelToken cancel, BlockingQueue<AgentEvent> out)
-            throws InterruptedException {
+            throws InterruptedException, StreamException {
         StringBuilder text = new StringBuilder();
         List<ToolCall> calls = new ArrayList<>();
         com.cortex.llm.Usage usage = null;
@@ -187,6 +339,10 @@ public final class Agent {
                     return new StreamOutcome(text.toString(), calls, usage, cancel.isCancelled());
                 }
                 case StreamEvent.Error e -> {
+                    if (e.cause() instanceof PromptTooLongException p) {
+                        // 上下文过长：抛给主循环走紧急压缩（已累加文本不写回 Conversation）
+                        throw new StreamException(p);
+                    }
                     emit(out, cancel, new AgentEvent.Failed(e.message()));
                     return new StreamOutcome(text.toString(), calls, usage, true);
                 }
@@ -205,6 +361,7 @@ public final class Agent {
      * 按模型调用顺序扫描：连续只读调用合并为并发批，有副作用调用单独串行。
      * 事件时序：Start 按调用序先发，End 也按调用序后发——并发只发生在执行环节，
      * UI 看到的顺序始终是调用序（N3）。每个工具受 per-tool 超时约束（N1）。
+     * ch08：结果回填前对成功的 ReadFile 调用重读纯净字节并写入文件追踪（F19/F19a）。
      */
     private BatchOutcome executeBatched(List<ToolCall> calls, Mode mode, CancelToken cancel,
                                         BlockingQueue<AgentEvent> out)
@@ -217,6 +374,7 @@ public final class Agent {
                     for (int k = i; k < calls.size(); k++) {
                         results[k] = new ToolResult(calls.get(k).id(), NOTICE_CANCELLED, true);
                     }
+                    recordReadFiles(calls, results);
                     return new BatchOutcome(List.of(results), false);
                 }
                 ToolCall call = calls.get(i);
@@ -229,13 +387,45 @@ public final class Agent {
                         for (int k = i + 1; k < calls.size(); k++) {
                             results[k] = new ToolResult(calls.get(k).id(), NOTICE_CANCELLED, true);
                         }
+                        recordReadFiles(calls, results);
                         return new BatchOutcome(List.of(results), false);
                     }
                     i = next;
                 }
             }
         }
+        recordReadFiles(calls, results);
         return new BatchOutcome(List.of(results), true);
+    }
+
+    /**
+     * 记录成功的 ReadFile 调用：用纯净字节（不带行号前缀）重读一次磁盘写入文件追踪，
+     * 作为恢复段的数据源。读盘失败 / 参数解析失败一律吞掉（缺一条无所谓）。
+     */
+    private void recordReadFiles(List<ToolCall> calls, ToolResult[] results) {
+        for (int i = 0; i < calls.size(); i++) {
+            ToolCall call = calls.get(i);
+            if (!"read_file".equals(call.name())) {
+                continue;
+            }
+            if (results[i] == null || results[i].isError()) {
+                continue;
+            }
+            try {
+                Map<String, Object> args = MAPPER.readValue(call.args(), new TypeReference<>() {});
+                Object pathObj = args.get("path");
+                if (!(pathObj instanceof String path) || path.isBlank()) {
+                    continue;
+                }
+                Path absPath = Path.of(path).toAbsolutePath().normalize();
+                String content = Files.readString(absPath, StandardCharsets.UTF_8);
+                runtime.recovery.recordFile(absPath.toString(), content);
+            } catch (IOException ignored) {
+                // 读盘失败吞掉
+            } catch (Exception ignored) {
+                // 参数解析失败跳过
+            }
+        }
     }
 
     /**

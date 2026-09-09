@@ -4,11 +4,14 @@ import com.cortex.agent.Agent;
 import com.cortex.agent.AgentEvent;
 import com.cortex.agent.ApprovalRequest;
 import com.cortex.agent.CancelToken;
+import com.cortex.agent.CompactEvent;
 import com.cortex.agent.Phase;
+import com.cortex.agent.SessionRuntime;
 import com.cortex.agent.ToolEvent;
 import com.cortex.config.ProviderConfig;
 import com.cortex.conversation.ConversationManager;
 import com.cortex.llm.LlmClient;
+import com.cortex.llm.ToolDef;
 import com.cortex.permission.Mode;
 import com.cortex.permission.Outcome;
 import com.cortex.permission.PermissionEngine;
@@ -16,10 +19,12 @@ import com.cortex.prompt.Prompt;
 import com.cortex.prompt.Reminder;
 import com.cortex.tool.ToolRegistry;
 import com.cortex.tui.tea.Command;
+import com.cortex.tui.tea.CompactNoticeMessage;
 import com.cortex.tui.tea.KeyPressMessage;
 import com.cortex.tui.tea.Message;
 import com.cortex.tui.tea.Model;
 import com.cortex.tui.tea.MouseMessage;
+import com.cortex.tui.tea.Program;
 import com.cortex.tui.tea.QuitMessage;
 import com.cortex.tui.tea.StreamTickMessage;
 import com.cortex.tui.tea.UpdateResult;
@@ -29,6 +34,7 @@ import com.cortex.tui.tea.WindowSizeMessage;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.BlockingQueue;
 
 /**
@@ -47,6 +53,7 @@ public class CortexModel implements Model {
     private final List<ProviderConfig> providers;
     private final ToolRegistry registry;
     private final PermissionEngine engine;
+    private final SessionRuntime runtime;
     private final ConversationManager conversation = new ConversationManager();
 
     private AppState state = AppState.CHAT;
@@ -58,6 +65,8 @@ public class CortexModel implements Model {
     // 当前会话
     private ProviderConfig activeProvider;
     private LlmClient client;
+    private Agent agent;
+    private Program program;
 
     private String input = "";
     private boolean streaming;
@@ -82,10 +91,12 @@ public class CortexModel implements Model {
     /** 已提交（渲染定型并写入 scrollback）的消息列表，用于退出时 dumpHistory。 */
     private final List<String> committed = new ArrayList<>();
 
-    public CortexModel(List<ProviderConfig> providers, ToolRegistry registry, PermissionEngine engine) {
+    public CortexModel(List<ProviderConfig> providers, ToolRegistry registry, PermissionEngine engine,
+                       SessionRuntime runtime) {
         this.providers = providers;
         this.registry = registry;
         this.engine = engine;
+        this.runtime = runtime;
         this.mode = engine.startMode();
         if (providers.size() == 1) {
             this.state = AppState.CHAT;
@@ -93,6 +104,11 @@ public class CortexModel implements Model {
         } else {
             this.state = AppState.PROVIDER_SELECT;
         }
+    }
+
+    /** 由 Main 注入 Program，供后台线程向 UI 事件循环投递消息。 */
+    public void attach(Program program) {
+        this.program = program;
     }
 
     @Override
@@ -117,6 +133,9 @@ public class CortexModel implements Model {
         }
         if (msg instanceof QuitMessage) {
             return new UpdateResult<>(this, null);
+        }
+        if (msg instanceof CompactNoticeMessage notice) {
+            return pushSystemMessage(notice.text());
         }
         if (msg instanceof StreamTickMessage) {
             return onStreamTick();
@@ -274,6 +293,8 @@ public class CortexModel implements Model {
     private void activate(ProviderConfig provider) {
         this.activeProvider = provider;
         this.client = LlmClient.create(provider);
+        this.runtime.contextWindow = provider.effectiveContextWindow();
+        this.agent = new Agent(client, registry, Prompt.VERSION, engine, runtime);
     }
 
     // ─── 提交一轮对话 ───
@@ -283,23 +304,9 @@ public class CortexModel implements Model {
         if (text.isEmpty()) {
             return new UpdateResult<>(this, null);
         }
-        if (text.equals("/exit") || text.equals("exit")) {
-            return new UpdateResult<>(this, Command.quit());
-        }
-
-        // Plan Mode 两段式（F10）
-        if (text.equals("/plan")) {
-            mode = Mode.PLAN;
-            String hint = Styles.MUTED.apply("⊕ 已进入计划模式：模型仅可用只读工具产出计划，用 /do 批准执行");
-            committed.add(hint);
-            return new UpdateResult<>(this, Command.println(hint));
-        }
-        if (text.equals("/do")) {
-            mode = Mode.DEFAULT;
-            conversation.addUserMessage(Reminder.EXECUTE_DIRECTIVE);
-            String doLine = Styles.USER_PREFIX.apply("❯ ") + Reminder.EXECUTE_DIRECTIVE;
-            committed.add(doLine);
-            return startTurn(doLine);
+        Optional<Commands.CommandHandler> handler = Commands.dispatchCommand(text);
+        if (handler.isPresent()) {
+            return handler.get().handle(this);
         }
 
         conversation.addUserMessage(text);
@@ -318,7 +325,7 @@ public class CortexModel implements Model {
         tickCounter = 0;
         turnCancel = new CancelToken();
         // Agent 虚拟线程内跑 ReAct 循环（请求 → 权限判定 → 工具 → 回灌 → 下一轮……直到停止条件）
-        agentQueue = new Agent(client, registry, Prompt.VERSION, engine).run(conversation, mode, turnCancel);
+        agentQueue = agent.run(conversation, mode, turnCancel);
 
         return new UpdateResult<>(this, Command.batch(
                 Command.println(userLine),
@@ -340,6 +347,12 @@ public class CortexModel implements Model {
                 switch (ev) {
                     case AgentEvent.Text delta -> streamBuf.append(delta.delta());
                     case AgentEvent.Tool tool -> turnOver |= handleToolEvent(tool, outputs);
+                    case CompactEvent compact -> {
+                        String text = Commands.formatCompactNotice(compact);
+                        String line = Styles.MUTED.apply("⊕ " + text);
+                        committed.add(line);
+                        outputs.add(Command.println(line));
+                    }
                     case AgentEvent.UsageReport u -> {
                         usageIn += u.usage().inputTokens();
                         usageOut += u.usage().outputTokens();
@@ -618,5 +631,53 @@ public class CortexModel implements Model {
             sb.append(line).append("\r\n");
         }
         return sb.toString();
+    }
+
+    // ─── Commands 处理器辅助 ───
+
+    /** /exit：退出主循环。 */
+    UpdateResult<? extends Model> commandExit() {
+        return new UpdateResult<>(this, Command.quit());
+    }
+
+    /** /plan：切换 Plan Mode，输出提示。 */
+    UpdateResult<? extends Model> commandPlan() {
+        mode = Mode.PLAN;
+        String hint = Styles.MUTED.apply("⊕ 已进入计划模式：模型仅可用只读工具产出计划，用 /do 批准执行");
+        committed.add(hint);
+        return new UpdateResult<>(this, Command.println(hint));
+    }
+
+    /** /do：切回 DEFAULT，注入执行指令并启动一轮。 */
+    UpdateResult<? extends Model> commandDo() {
+        mode = Mode.DEFAULT;
+        conversation.addUserMessage(Reminder.EXECUTE_DIRECTIVE);
+        String doLine = Styles.USER_PREFIX.apply("❯ ") + Reminder.EXECUTE_DIRECTIVE;
+        committed.add(doLine);
+        return startTurn(doLine);
+    }
+
+    /** 渲染一条系统消息到 scrollback（命令路径 / 未知命令 / 手动压缩提示）。不写入 conversation。 */
+    UpdateResult<? extends Model> pushSystemMessage(String text) {
+        String line = Styles.MUTED.apply("⊕ " + text);
+        committed.add(line);
+        return new UpdateResult<>(this, Command.println(line));
+    }
+
+    /** 后台线程回投：把手动压缩结果文本推给 UI 线程。 */
+    void pushCompactNotice(String text) {
+        if (program != null) {
+            program.send(new CompactNoticeMessage(text));
+        }
+    }
+
+    /** 当前工具定义（与下一次 run 的 Request.tools 保持一致）。 */
+    List<ToolDef> currentDefs() {
+        return registry.definitions();
+    }
+
+    /** 手动 /compact 调用入口（由 Commands 在后台线程触发）。 */
+    Agent.ForceCompactResult runForceCompact(List<ToolDef> defs) {
+        return agent.runForceCompact(conversation, defs);
     }
 }

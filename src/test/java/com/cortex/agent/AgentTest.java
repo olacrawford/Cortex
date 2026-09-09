@@ -712,4 +712,63 @@ class AgentTest {
         assertEquals(81, preview.length()); // 80 字符 + 省略号
         assertTrue(preview.endsWith("…"));
     }
+
+    // ─── ch08：紧急压缩 ───
+
+    @Test
+    void 撞墙紧急压缩后重试成功() throws Exception {
+        StubTool stub = new StubTool("read_file", true, Result.ok("x"));
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(stub);
+
+        FakeClient client = new FakeClient();
+        // 第 1 次：主请求 PTL
+        client.enqueue(List.of(new StreamEvent.Error("ptl",
+                new com.cortex.llm.PromptTooLongException(new RuntimeException("ptl")))));
+        // 第 2 次：摘要请求正常
+        client.enqueue(List.of(new StreamEvent.TextDelta("<summary>恢复上下文</summary>"),
+                new StreamEvent.StreamEnd("stop", 0, 0)));
+        // 第 3 次：重试主请求正常
+        client.enqueue(List.of(new StreamEvent.TextDelta("重试成功。"),
+                new StreamEvent.StreamEnd("stop", 0, 0)));
+
+        ConversationManager conv = new ConversationManager();
+        conv.addUserMessage("读文件");
+        List<AgentEvent> list = runAndDrain(agent(client, registry), conv, new CancelToken());
+
+        assertTrue(list.stream().anyMatch(e -> e instanceof CompactEvent c
+                && c.phase() == CompactPhase.BEFORE_EMERGENCY));
+        assertTrue(list.stream().anyMatch(e -> e instanceof CompactEvent c
+                && c.phase() == CompactPhase.AFTER_EMERGENCY && c.error() == null));
+        assertTrue(list.stream().anyMatch(e -> e instanceof AgentEvent.Text t
+                && t.delta().equals("重试成功。")));
+        assertInstanceOf(AgentEvent.Done.class, list.get(list.size() - 1));
+        assertEquals("重试成功。", conv.getMessages().get(conv.size() - 1).getContent());
+    }
+
+    @Test
+    void 撞墙紧急压缩后再次撞墙上抛() throws Exception {
+        StubTool stub = new StubTool("read_file", true, Result.ok("x"));
+        ToolRegistry registry = new ToolRegistry();
+        registry.register(stub);
+
+        FakeClient client = new FakeClient();
+        client.enqueue(List.of(new StreamEvent.Error("ptl",
+                new com.cortex.llm.PromptTooLongException(new RuntimeException("ptl1")))));
+        client.enqueue(List.of(new StreamEvent.TextDelta("<summary>恢复</summary>"),
+                new StreamEvent.StreamEnd("stop", 0, 0)));
+        // 重试主请求再次 PTL
+        client.enqueue(List.of(new StreamEvent.Error("ptl",
+                new com.cortex.llm.PromptTooLongException(new RuntimeException("ptl2")))));
+
+        ConversationManager conv = new ConversationManager();
+        conv.addUserMessage("读文件");
+        List<AgentEvent> list = runAndDrain(agent(client, registry), conv, new CancelToken());
+
+        // 上抛错误，不再做第三次紧急压缩
+        assertTrue(list.stream().anyMatch(e -> e instanceof AgentEvent.Failed));
+        assertInstanceOf(AgentEvent.Done.class, list.get(list.size() - 1));
+        // 只发生了一次摘要请求 + 一次重试主请求（不再做第二次紧急压缩）
+        assertEquals(3, client.streamCalls());
+    }
 }
