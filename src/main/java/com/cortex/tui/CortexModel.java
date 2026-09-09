@@ -111,8 +111,9 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
     // SubAgent 系统（阶段12）：后台任务管理器 + Agent 工具（可空 = 未装配）
     private final com.cortex.task.Manager taskMgr;
     private final com.cortex.agent.AgentTool agentTool;
-    /** 子 Agent 审批转发与主 TUI pending 之间的互斥锁。 */
+    /** 审批串行化闸：pending 弹窗之外的后续请求排队，杜绝互相覆盖丢请求。 */
     private final Object approvalGate = new Object();
+    private final java.util.ArrayDeque<ApprovalRequest> approvalQueue = new java.util.ArrayDeque<>();
 
     private AppState state = AppState.CHAT;
     private int width = 80;
@@ -222,37 +223,44 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
     // ─── SubAgent 集成（阶段12）───
 
     /**
-     * 子 Agent 审批转发器（F13）：等主 TUI 的 pending 空闲 → 抢占弹窗 → 阻塞等用户三选一。
-     * 返回 empty（含中断兜底 DENY_ONCE 后）让子 Agent 回落默认路径。
+     * 审批请求统一入口（F13）：主 Agent（事件流）与子 Agent（转发器）共用。
+     * pending 空闲则直接弹窗，否则排队——保证任何请求都不会被覆盖丢失。
      */
-    private java.util.Optional<Outcome> upgradeApprovalFromSubAgent(ApprovalRequest req) {
-        try {
-            synchronized (approvalGate) {
-                while (pending != null) {
-                    approvalGate.wait(200);
-                }
+    private void offerApproval(ApprovalRequest req) {
+        synchronized (approvalGate) {
+            if (pending == null) {
                 pending = req;
+            } else {
+                approvalQueue.addLast(req);
             }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return java.util.Optional.empty();
         }
         if (program != null) {
             program.send(new com.cortex.tui.tea.SubAgentApprovalMessage());
         }
+    }
+
+    /** 当前裁决完成 → 从队列晋升下一个待批准请求。 */
+    private void promoteNextApproval() {
+        synchronized (approvalGate) {
+            pending = approvalQueue.pollFirst();
+        }
+        if (pending != null && program != null) {
+            program.send(new com.cortex.tui.tea.SubAgentApprovalMessage());
+        }
+    }
+
+    /**
+     * 子 Agent 审批转发器（F13）：入队弹窗并阻塞等用户三选一。
+     * 返回 empty（含中断兜底 DENY_ONCE 后）让子 Agent 回落默认路径。
+     */
+    private java.util.Optional<Outcome> upgradeApprovalFromSubAgent(ApprovalRequest req) {
+        offerApproval(req);
         try {
             return java.util.Optional.of(req.respond().take());
         } catch (InterruptedException e) {
             req.respond().offer(Outcome.DENY_ONCE); // 中断兜底解阻塞，让子 Agent 以拒绝收尾
             Thread.currentThread().interrupt();
             return java.util.Optional.empty();
-        } finally {
-            synchronized (approvalGate) {
-                if (pending == req) {
-                    pending = null;
-                }
-                approvalGate.notifyAll();
-            }
         }
     }
 
@@ -353,7 +361,7 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
         if (pending != null) {
             pending.respond().offer(outcome);
         }
-        pending = null;
+        promoteNextApproval();
         return new UpdateResult<>(this, null);
     }
 
@@ -362,7 +370,7 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
         if (pending != null) {
             pending.respond().offer(Outcome.DENY_ONCE);
         }
-        pending = null;
+        promoteNextApproval();
         if (turnCancel != null) {
             turnCancel.cancel();
         }
@@ -778,7 +786,7 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
                         committed.add(line);
                         outputs.add(Command.println(line));
                     }
-                    case AgentEvent.Approval approval -> pending = approval.request();
+                    case AgentEvent.Approval approval -> offerApproval(approval.request());
                     case AgentEvent.Done done -> {
                         outputs.addAll(finishTurn());
                         turnOver = true;

@@ -137,7 +137,9 @@ public final class Manager implements TaskManagerPort {
         bt.status = Status.RUNNING;
         bt.result = null;
         bt.err = null;
-        runTask(bt, ""); // conv 末尾已是新 user 消息，task 传空（T28 方案：runToCompletion 空串不追加）
+        // 续派必须在新虚拟线程上跑（runTask 内联跑 runToCompletion）：
+        // 若在调用方（SendMessage 工具执行）线程上跑，工具会被拖到 per-tool 超时
+        Thread.ofVirtual().name("subagent-" + id + "-resume").start(() -> runTask(bt, ""));
         return id;
     }
 
