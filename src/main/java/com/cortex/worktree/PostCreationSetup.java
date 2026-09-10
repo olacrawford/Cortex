@@ -5,7 +5,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Stream;
 
 /**
@@ -48,7 +47,7 @@ public final class PostCreationSetup {
         }
     }
 
-    /** A（F7）：复制本地配置；目标已存在跳过、源不存在跳过。 */
+    /** A（F7）：复制本地配置；目标已存在跳过、源不存在跳过。变更检查侧由 GitHelper 排除 .cortex/。 */
     static void copyLocalConfigs(Path repoRoot, Path wtPath) throws IOException {
         for (String rel : LOCAL_CONFIG_FILES) {
             Path src = repoRoot.resolve(rel);

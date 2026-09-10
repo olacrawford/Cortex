@@ -74,6 +74,8 @@ class WorktreeCreateTest {
         Worktree wt = mgr.create("alice", "HEAD", true);
         assertTrue(Files.exists(wt.path().resolve(".cortex/settings.local.yaml")),
                 "AC5：settings.local.yaml 应被复制");
+        // 复制的配置不得让 worktree 变成「有未提交修改」（否则 autoCleanup 永远保留，G9）
+        assertFalse(GitHelper.hasWorktreeChanges(wt.path(), wt.headCommit()), "status（排除 .cortex/）应干净");
     }
 
     @Test

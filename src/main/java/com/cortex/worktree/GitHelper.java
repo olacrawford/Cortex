@@ -58,14 +58,18 @@ public final class GitHelper {
         }
     }
 
+    /** 复制进 worktree 的运行时目录（阶段13 设置 A），变更检查时排除。 */
+    private static final String RUNTIME_DIR = ".cortex";
+
     /**
      * 变更检查（F15）：① {@code status --porcelain} 非空 = 有未提交修改；
      * ② {@code rev-list --count <base>..HEAD} &gt; 0 = 有本地新增 commit。
+     * status 排除运行时副本目录（设置 A 复制的 .cortex/ 配置不算变更，G9）。
      * 任一 git 命令本身出错 fail-closed 返回 true（宁可保留，G10）。
      */
     public static boolean hasWorktreeChanges(Path wtPath, String baseCommit) {
         try {
-            if (!runGit(wtPath, "status", "--porcelain").isEmpty()) {
+            if (!runGit(wtPath, "status", "--porcelain", "--", ".", ":(exclude)" + RUNTIME_DIR).isEmpty()) {
                 return true;
             }
             String count = runGit(wtPath, "rev-list", "--count", baseCommit + "..HEAD");
