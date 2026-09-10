@@ -124,9 +124,12 @@ public final class TeamManager implements TeamHook, com.cortex.task.TeamCollabor
             Files.createDirectories(configDir);
             Files.createDirectories(configDir.resolve("mailbox"));
             Team team = new Team(name, unique, "lead", backend, description, Instant.now(), configDir);
+            // F5-6：Lead 注册为第一个成员（SendMessage 的 to=lead 寻址依赖此条目）
+            team.addMember(new TeammateInfo("lead", "lead", "", "",
+                    "", "", backend, "", null, false, ""));
             Persistence.atomicWriteJson(team.configPath(), new Persistence.TeamSnapshot(
                     name, unique, "lead", backend, team.description(),
-                    team.createdAt().getEpochSecond(), List.of()));
+                    team.createdAt().getEpochSecond(), team.members()));
             teams.put(unique, team);
             return team;
         } finally {
@@ -369,6 +372,11 @@ public final class TeamManager implements TeamHook, com.cortex.task.TeamCollabor
                         fromMember, m.name(), msgType, summary, message, payload, 0, false));
                 delivered.add(m.agentId());
             }
+        } else if ("lead".equalsIgnoreCase(to.strip())) {
+            // Lead 不在注册表（无 BackgroundTask）：直接写 leadAgentId 邮箱（G7）
+            new Mailbox(team.mailboxDir()).write(team.leadAgentId(), new Message(
+                    fromMember, to, msgType, summary, message, payload, 0, false));
+            delivered.add(team.leadAgentId());
         } else {
             String agentId = registry.resolve(to)
                     .orElseThrow(() -> new TeamException("收件人不存在: " + to));

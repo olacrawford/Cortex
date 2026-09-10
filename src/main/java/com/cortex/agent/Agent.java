@@ -982,6 +982,18 @@ public final class Agent {
             emit(out, cancel, toolEvent(call, Phase.END, text, true));
             return i + 1;
         }
+        // 阶段14：工具闸提前到权限判定之前——白名单外的调用直接回灌错误（Coordinator 收窄后
+        // 模型幻觉调用 write_file 时不再触发审批弹窗，而是立即可见的越权错误）
+        if (!toolAllowed(call.name())) {
+            emit(out, cancel, toolEvent(call, Phase.START, "", false));
+            String text = "工具未授权（子 Agent 工具白名单不含 " + call.name() + "）";
+            results[i] = new ToolResult(call.id(), text, true);
+            dispatchHook(Event.POST_TOOL_USE, mode, cancel, Map.of(
+                    "tool_name", call.name(), "tool_input", toolInputMap(call),
+                    "tool_result", text, "is_error", true));
+            emit(out, cancel, toolEvent(call, Phase.END, text, true));
+            return i + 1;
+        }
         PermissionEngine.CheckResult cr = engine.check(mode, call, false);
         Result r = switch (cr.decision()) {
             case DENY -> {
@@ -1024,9 +1036,6 @@ public final class Agent {
         };
         if (r == null) {
             return -1; // 人在回路等待中被取消
-        }
-        if (!toolAllowed(call.name())) {
-            r = Result.error("工具未授权（子 Agent 工具白名单不含 " + call.name() + "）");
         }
         results[i] = new ToolResult(call.id(), r.content(), r.isError());
         // PostToolUse：拿到 result 之后、PhaseEnd emit 之前（F9）

@@ -120,6 +120,44 @@ class SpawnTeammateTest {
     }
 
     @Test
+    void 队员调SendMessage_to_lead写入lead邮箱() throws Exception {
+        Deps d = setup();
+        d.teamMgr().create("demo", "", BackendType.IN_PROCESS);
+        // 队员脚本：第 1 轮调 SendMessage(to=lead)，第 2 轮文本收尾
+        java.util.concurrent.atomic.AtomicBoolean called = new java.util.concurrent.atomic.AtomicBoolean();
+        com.cortex.llm.LlmClient client = req -> {
+            LinkedBlockingQueue<StreamEvent> q = new LinkedBlockingQueue<>();
+            if (called.compareAndSet(false, true)) {
+                q.add(new StreamEvent.ToolCallComplete("c1", "SendMessage",
+                        "{\"to\":\"lead\",\"summary\":\"hello from alice\",\"message\":\"hello from teammate\"}"));
+            } else {
+                q.add(new StreamEvent.TextDelta("已汇报"));
+            }
+            q.add(new StreamEvent.StreamEnd("tool_use", 0, 0));
+            return q;
+        };
+        // 注册 SendMessage 工具（带协作分派）到 LeadEnv 的 registry
+        com.cortex.tool.ToolRegistry registry = new com.cortex.tool.ToolRegistry();
+        registry.register(new com.cortex.task.SendMessageTool(d.taskMgr(), d.teamMgr()));
+        d.teamMgr().setLeadEnv(new TeamManager.LeadEnv(client, registry,
+                "test", PermissionEngine.create(d.repo()), 200000, d.repo(), null));
+
+        d.teamMgr().spawnTeammate(new com.cortex.agent.TeamHook.TeamSpawnRequest(
+                "demo", "任务", "alice", "worker", null, null));
+        // 等队员跑完
+        Thread.sleep(1500);
+        Team team = d.teamMgr().get("demo").orElseThrow();
+        Mailbox mailbox = new Mailbox(team.mailboxDir());
+        var leadMsgs = mailbox.read("lead");
+        System.out.println("LEAD-MAILBOX: " + leadMsgs.size() + " 条");
+        for (Message m : leadMsgs) {
+            System.out.println("  from=" + m.from() + " type=" + m.type() + " summary=" + m.summary());
+        }
+        assertTrue(leadMsgs.stream().anyMatch(m -> "hello from alice".equals(m.summary())),
+                "lead 邮箱应收到队员消息");
+    }
+
+    @Test
     void pane后端spawn被拒() throws Exception {
         Deps d = setup();
         Team t = d.teamMgr().create("pane-demo", "", BackendType.TMUX);

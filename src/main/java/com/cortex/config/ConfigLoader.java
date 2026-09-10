@@ -60,6 +60,14 @@ public class ConfigLoader {
 
         AppConfig config = new AppConfig();
         config.setProviders(providers);
+        // 阶段14（T25）：features 段（缺省全 false）
+        Object featuresObj = raw.get("features");
+        if (featuresObj instanceof Map<?, ?> featuresMap) {
+            Object cm = featuresMap.get("coordinator_mode");
+            Object ft = featuresMap.get("fork_teammate");
+            config.setFeatures(new AppConfig.Features(
+                    cm instanceof Boolean b && b, ft instanceof Boolean b2 && b2));
+        }
         // 阶段12（N6）：SubAgent 后台开关（缺省 true——缺键时保持 null）
         config.setEnableSubAgentBackground(getBooleanOrNull(raw, "enable_sub_agent_background"));
         return config;

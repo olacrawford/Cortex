@@ -157,8 +157,9 @@ public final class Manager implements TaskManagerPort {
         if (bt == null) {
             throw new IllegalStateException("未找到后台任务 " + id);
         }
-        if (bt.status() != Status.COMPLETED) {
-            throw new IllegalStateException("任务 " + name + " 尚未完成（当前 " + bt.status().wireName() + "），不能续派");
+        // 阶段14（F46/T31）：FAILED 的队员任务同样可续（如 maxTurns 打断后的继续指派）
+        if (bt.status() == Status.RUNNING) {
+            throw new IllegalStateException("任务 " + name + " 仍在运行中（当前 " + bt.status().wireName() + "），不能续派");
         }
         bt.conv.addUserMessage(message);
         bt.status = Status.RUNNING;
