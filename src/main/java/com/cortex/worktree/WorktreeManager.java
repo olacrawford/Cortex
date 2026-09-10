@@ -42,7 +42,15 @@ public final class WorktreeManager {
         } catch (IOException e) {
             throw new IOException("目录不是 git 仓库: " + this.repoRoot, e);
         }
-        if (!Path.of(toplevel.strip()).toAbsolutePath().normalize().equals(this.repoRoot)) {
+        // macOS 等环境 /tmp → /private/tmp 有符号链接，比较前先解析真实路径
+        Path gitTop = Path.of(toplevel.strip()).toAbsolutePath().normalize();
+        Path realRoot;
+        try {
+            realRoot = this.repoRoot.toRealPath();
+        } catch (IOException e) {
+            realRoot = this.repoRoot;
+        }
+        if (!realRoot.equals(gitTop)) {
             throw new IOException("repoRoot 与 git toplevel 不一致: " + toplevel);
         }
         this.worktreeDir = this.repoRoot.resolve(".cortex").resolve("worktrees");

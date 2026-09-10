@@ -101,11 +101,29 @@ public final class GitHelper {
             String headText = Files.readString(head, StandardCharsets.UTF_8).strip();
             if (headText.startsWith("ref:")) {
                 String ref = headText.substring("ref:".length()).strip();
-                Path refFile = gitdir.resolve(ref);
-                if (Files.isRegularFile(refFile)) {
-                    return Optional.of(Files.readString(refFile, StandardCharsets.UTF_8).strip());
+                // worktree 分支的 SHA 通常在主仓公共 refs（gitdir 只存 HEAD 与私有状态）
+                Path common = gitdir;
+                Path commondirFile = gitdir.resolve("commondir");
+                if (Files.isRegularFile(commondirFile)) {
+                    String cd = Files.readString(commondirFile, StandardCharsets.UTF_8).strip();
+                    Path commonPath = Path.of(cd);
+                    common = commonPath.isAbsolute() ? commonPath : gitdir.resolve(commonPath).normalize();
                 }
-                // 分支 SHA 落在主仓公共 refs/packed-refs 时无法纯 FS 解析，兜底 empty
+                for (Path base : new Path[]{gitdir, common}) {
+                    Path refFile = base.resolve(ref);
+                    if (Files.isRegularFile(refFile)) {
+                        return Optional.of(Files.readString(refFile, StandardCharsets.UTF_8).strip());
+                    }
+                }
+                // 兜底：packed-refs（公共目录）
+                Path packed = common.resolve("packed-refs");
+                if (Files.isRegularFile(packed)) {
+                    for (String line : Files.readAllLines(packed, StandardCharsets.UTF_8)) {
+                        if (line.endsWith(" " + ref)) {
+                            return Optional.of(line.substring(0, line.indexOf(' ')).strip());
+                        }
+                    }
+                }
                 return Optional.empty();
             }
             return Optional.of(headText); // detached HEAD：内容即 SHA
