@@ -132,6 +132,16 @@ public final class Team {
         }
     }
 
+    /** 从磁盘重读成员（F19c：子进程启动时同步 Lead 已写入的成员条目）。 */
+    public void reloadFromDisk() {
+        lock.lock();
+        try {
+            Persistence.reloadMembersFromDiskLocked(this);
+        } finally {
+            lock.unlock();
+        }
+    }
+
     /** 仅供 Persistence.reloadMembersFromDiskLocked 在持锁状态下覆盖 members。 */
     void replaceMembersLocked(List<TeammateInfo> reloaded) {
         members.clear();

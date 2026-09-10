@@ -24,10 +24,10 @@ public final class BackendDetector {
         if (env.get("TMUX") != null) {
             return BackendType.TMUX;
         }
-        if ("iTerm.app".equals(env.get("TERM_PROGRAM")) && findOnPath("it2").isPresent()) {
+        if ("iTerm.app".equals(env.get("TERM_PROGRAM")) && findOnPath(env, "it2").isPresent()) {
             return BackendType.ITERM2;
         }
-        if (findOnPath("tmux").isPresent()) {
+        if (findOnPath(env, "tmux").isPresent()) {
             return BackendType.TMUX;
         }
         return BackendType.IN_PROCESS;
@@ -35,7 +35,12 @@ public final class BackendDetector {
 
     /** 在 PATH 中查找可执行文件。 */
     public static Optional<String> findOnPath(String binary) {
-        String path = System.getenv("PATH");
+        return findOnPath(System::getenv, binary);
+    }
+
+    /** Env 注入版本（T11：测试可控）。 */
+    public static Optional<String> findOnPath(Env env, String binary) {
+        String path = env.get("PATH");
         if (path == null || path.isBlank()) {
             return Optional.empty();
         }

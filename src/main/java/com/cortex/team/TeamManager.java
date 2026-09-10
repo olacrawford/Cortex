@@ -57,16 +57,27 @@ public final class TeamManager implements TeamHook, com.cortex.task.TeamCollabor
     private final Map<String, Team> teams = new LinkedHashMap<>(); // sanitized → Team
     private volatile LeadEnv leadEnv;
     private final Catalog agentCatalog;
+    private final BackendDetector.Env env;
 
     public TeamManager(Path homeDir, Path projectRoot, WorktreeManager worktreeManager,
                        Manager taskManager, AgentNameRegistry registry,
                        Catalog agentCatalog, String cortexJar) throws IOException {
+        this(homeDir, projectRoot, worktreeManager, taskManager, registry, agentCatalog,
+                cortexJar, System::getenv);
+    }
+
+    /** Env 注入构造（T11：测试可控后端检测）。 */
+    public TeamManager(Path homeDir, Path projectRoot, WorktreeManager worktreeManager,
+                       Manager taskManager, AgentNameRegistry registry,
+                       Catalog agentCatalog, String cortexJar,
+                       BackendDetector.Env env) throws IOException {
         this.teamsDir = homeDir.resolve(".cortex").resolve("teams");
         this.projectRoot = projectRoot.toAbsolutePath().normalize();
         this.worktreeManager = worktreeManager;
         this.taskManager = taskManager;
         this.registry = registry;
         this.agentCatalog = agentCatalog;
+        this.env = env;
         this.backendFactory = new BackendFactory(cortexJar, taskManager);
         Files.createDirectories(teamsDir);
         restoreFromDisk();
@@ -103,11 +114,6 @@ public final class TeamManager implements TeamHook, com.cortex.task.TeamCollabor
     // ─── 创建（F5/AC2/AC3）───
 
     public Team create(String name, String description) throws IOException {
-        return create(name, description, null);
-    }
-
-    /** create 带 BackendType 覆盖（TeamCreate 工具可选 backend 参数，调试/E2E 用；null = 检测）。 */
-    public Team create(String name, String description, BackendType overrideBackend) throws IOException {
         String sanitized = Persistence.sanitize(name);
         if (sanitized.isEmpty()) {
             throw new TeamException("团队名清洗后为空: " + name);
@@ -119,7 +125,7 @@ public final class TeamManager implements TeamHook, com.cortex.task.TeamCollabor
             while (teams.containsKey(unique)) { // AC3：同名自动 -2/-3
                 unique = sanitized + "-" + suffix++;
             }
-            BackendType backend = overrideBackend != null ? overrideBackend : BackendDetector.detect();
+            BackendType backend = BackendDetector.detect(env);
             Path configDir = teamsDir.resolve(unique);
             Files.createDirectories(configDir);
             Files.createDirectories(configDir.resolve("mailbox"));
@@ -199,10 +205,6 @@ public final class TeamManager implements TeamHook, com.cortex.task.TeamCollabor
             throw new TeamException("Team 装配未就绪（主 Agent 尚未初始化）");
         }
         Team team = get(req.teamName()).orElseThrow(() -> new TeamNotFoundException(req.teamName()));
-        if (team.backend().isPane()) {
-            throw new TeamException("Pane 后端（tmux/iterm2）的队员子进程自治模式（--team-member）本期未实现，"
-                    + "请在无 tmux 环境启动（自动选中 in-process）或用 TeamCreate 的 backend 参数显式指定 in-process");
-        }
         String memberName = req.memberName() == null || req.memberName().isBlank()
                 ? "member-" + String.format("%04x", ThreadLocalRandom.current().nextInt(0x10000))
                 : req.memberName().strip();
@@ -268,28 +270,42 @@ public final class TeamManager implements TeamHook, com.cortex.task.TeamCollabor
                     } catch (IOException ignored) {
                     }
                 });
-        subAgent.setTeammateContext(tc);
-        subAgent.setToolContext(ToolContext.EMPTY.withCwd(wt.path()).withTeammate(tc));
-
-        ConversationManager conv = new ConversationManager();
+        String agentId = team.backend().isPane()
+                ? String.format("agent-%014x", ThreadLocalRandom.current().nextLong()) : "";
+        agentIdRef.set(agentId);
         String taskText = req.prompt() == null ? "" : req.prompt();
 
-        // in-process：launch 生成 agentId（= BackgroundTask.id）
-        String agentId = backendFactory.create(team.backend()).spawn(new Backend.SpawnRequest(
-                team.sanitizedName(), memberName, "", wt.path().toString(),
-                sessionDir.toString(), typeName, req.model(), taskText,
-                planRequired, subAgent, conv, taskManager)).agentId();
-        agentIdRef.set(agentId);
+        String paneId = "";
+        if (team.backend().isPane()) {
+            // F13/F25-9：Pane 后端 initialPrompt 不走命令行——预写队员邮箱，子进程启动后自然读到
+            mailbox.write(agentId, new Message("lead", agentId, MessageType.TEXT,
+                    truncateForSummary(taskText), taskText, null, 0, false));
+            paneId = backendFactory.create(team.backend()).spawn(new Backend.SpawnRequest(
+                    team.sanitizedName(), memberName, agentId, wt.path().toString(),
+                    sessionDir.toString(), typeName, req.model(), "",
+                    planRequired, null, null, null)).paneId();
+        } else {
+            // in-process：构造子 Agent + 空白对话，taskText 直接作为 launch 任务
+            subAgent.setTeammateContext(tc);
+            subAgent.setToolContext(ToolContext.EMPTY.withCwd(wt.path()).withTeammate(tc));
+            var conv = new ConversationManager();
+            agentId = backendFactory.create(team.backend()).spawn(new Backend.SpawnRequest(
+                    team.sanitizedName(), memberName, agentId, wt.path().toString(),
+                    sessionDir.toString(), typeName, req.model(), taskText,
+                    planRequired, subAgent, conv, taskManager)).agentId();
+            agentIdRef.set(agentId);
+        }
 
         registry.register(memberName, agentId);
         team.addMember(new TeammateInfo(memberName, agentId, typeName,
                 req.model() == null ? "" : req.model(),
-                wt.path().toString(), wt.branch(), team.backend(), "",
+                wt.path().toString(), wt.branch(), team.backend(), paneId,
                 true, planRequired, sessionDir.toString()));
 
         return "{\"memberName\":\"" + memberName + "\",\"agentId\":\"" + agentId
                 + "\",\"worktree\":\"" + wt.path().toString().replace("\\", "\\\\")
-                + "\",\"backend\":\"" + team.backend().wireValue() + "\",\"paneId\":\"\"}";
+                + "\",\"backend\":\"" + team.backend().wireValue()
+                + "\",\"paneId\":\"" + paneId + "\"}";
     }
 
     // ─── 队员空闲通知（T30/F45/AC17）───
@@ -445,6 +461,16 @@ public final class TeamManager implements TeamHook, com.cortex.task.TeamCollabor
 
     // ─── helpers ───
 
+    /** 初始任务的 mailbox summary（F13）：取前 8 个词。 */
+    public static String truncateForSummary(String prompt) {
+        if (prompt == null || prompt.isBlank()) {
+            return "new task";
+        }
+        String[] words = prompt.strip().split("\\s+");
+        return words.length <= 8 ? prompt.strip()
+                : String.join(" ", List.of(words).subList(0, 8)) + "…";
+    }
+
     /** 队员系统提示附录（F39）。 */
     public static String teamSystemPromptSuffix() {
         return """
@@ -478,7 +504,8 @@ public final class TeamManager implements TeamHook, com.cortex.task.TeamCollabor
                 </team-context>""".formatted(team.sanitizedName(), memberName, worktree, members);
     }
 
-    private static TeammateContext.IncomingMessage toIncoming(Message m) {
+    /** Message → 队员闭包轻量消息（cli.TeamMemberRunner 复用）。 */
+    public static TeammateContext.IncomingMessage toIncoming(Message m) {
         return new TeammateContext.IncomingMessage(m.from(), m.type().wire(),
                 m.summary(), m.content(),
                 m.payload() == null ? null : m.payload().approve(),

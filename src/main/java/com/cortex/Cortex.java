@@ -37,6 +37,12 @@ import java.util.Map;
 public class Cortex {
 
     public static void main(String[] args) {
+        // 阶段14（F19a）：Pane 后端 spawn 的队员子进程——不启动 TUI，跑自治循环
+        if (java.util.List.of(args).contains("--team-member")) {
+            int code = new picocli.CommandLine(
+                    new com.cortex.cli.TeamMemberRunner.Args()).execute(args);
+            java.lang.System.exit(code == 0 ? 0 : 1);
+        }
         String configPath = ".cortex/config.yaml";
         try {
             Path root = Path.of("").toAbsolutePath();
@@ -96,12 +102,20 @@ public class Cortex {
             }
 
             // ch14：Team 管理器 + 协作工具注册（TeamCreate/TeamDelete 总可见；TaskCreate/TaskUpdate 仅队员可见）
+            // jar 绝对路径：Pane 后端在别的 cwd 起子进程，相对路径会找不到 jar
+            String cortexJar;
+            try {
+                cortexJar = Path.of(Cortex.class.getProtectionDomain().getCodeSource()
+                        .getLocation().toURI()).toString();
+            } catch (Exception e) {
+                cortexJar = "build/libs/cortex.jar";
+            }
             com.cortex.team.TeamManager teamMgr = null;
             if (worktreeMgr != null) {
                 try {
                     teamMgr = new com.cortex.team.TeamManager(
                             Path.of(System.getProperty("user.home")), root, worktreeMgr, taskMgr,
-                            nameReg, subAgentCatalog, "build/libs/cortex.jar");
+                            nameReg, subAgentCatalog, cortexJar);
                 } catch (Exception terr) {
                     System.err.println("[team] warn: 管理器未启用: " + terr.getMessage());
                 }
@@ -140,7 +154,7 @@ public class Cortex {
             CortexModel model = new CortexModel(config.getProviders(), registry, engine, runtime,
                     writer, memMgr, instructionText, memoryText, root.resolve(".cortex/sessions"),
                     skillCatalog, hookEngine, taskMgr, agentTool, worktreeMgr,
-                    teamMgr, "build/libs/cortex.jar", coordinatorMode);
+                    teamMgr, cortexJar, coordinatorMode);
             // ch10：远程安装工具 → 装完 reload catalog 并重新注册斜杠命令，无需重启
             registry.register(new InstallSkillTool(skillCatalog, root,
                     Path.of(System.getProperty("user.home"), ".cortex", "skills"),

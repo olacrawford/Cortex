@@ -35,9 +35,7 @@ public final class TeamCreateTool implements Tool {
                 "properties", Map.of(
                         "teamName", Map.of("type", "string", "description", "团队名（自动清洗为路径安全名，重名自动 -2/-3）"),
                         "description", Map.of("type", "string", "description", "团队描述（可选）"),
-                        "backend", Map.of("type", "string", "enum",
-                                List.of("in-process", "tmux", "iterm2"),
-                                "description", "执行后端覆盖（默认自动检测；tmux/iterm2 的队员子进程模式本期未实现，建议 in-process）")),
+                        "agentType", Map.of("type", "string", "description", "保留位（本期不使用）")),
                 "required", List.of("teamName"));
     }
 
@@ -53,10 +51,8 @@ public final class TeamCreateTool implements Tool {
             return Result.error("缺少必填参数 teamName");
         }
         String description = TaskArg.stringArg(argsJson, "description");
-        String backend = TaskArg.stringArg(argsJson, "backend");
         try {
-            BackendType type = backend == null || backend.isBlank() ? null : BackendType.fromWire(backend);
-            Team team = manager.create(teamName.strip(), description, type);
+            Team team = manager.create(teamName.strip(), description);
             return Result.ok("{\"teamName\":\"" + team.sanitizedName()
                     + "\",\"backend\":\"" + team.backend().wireValue()
                     + "\",\"configPath\":\"" + team.configPath().toString().replace("\\", "\\\\") + "\"}");
