@@ -159,8 +159,9 @@ class SpawnTeammateTest {
 
     @Test
     void pane后端spawn被拒() throws Exception {
+        // F19a 落地后 pane spawn 走真实 split-window（需要 tmux server + LLM 子进程），
+        // 拒绝语义已由 TeamManager pane 分支实现；单测覆盖其「确定性 TMUX 检测」部分：
         Deps d = setup();
-        // TMUX env → detect 为 TMUX（确定性）
         TeamManager tmuxMgr = new TeamManager(tmp.resolve("home-pane"), d.repo(), d.wtMgr(),
                 d.taskMgr(), d.registry(), Catalog.load(d.repo()), "cortex.jar", k -> "session");
         tmuxMgr.setLeadEnv(new TeamManager.LeadEnv(textClient(),
@@ -168,10 +169,6 @@ class SpawnTeammateTest {
                 PermissionEngine.create(d.repo()), 200000, d.repo(), null));
         Team t = tmuxMgr.create("pane-demo", "");
         assertEquals(BackendType.TMUX, t.backend(), "TMUX env → pane 后端");
-        TeamException e = assertThrows(TeamException.class,
-                () -> tmuxMgr.spawnTeammate(new com.cortex.agent.TeamHook.TeamSpawnRequest(
-                        t.sanitizedName(), "任务", "carol", "worker", null, null)));
-        assertTrue(e.getMessage().contains("未实现"));
     }
 
     @Test

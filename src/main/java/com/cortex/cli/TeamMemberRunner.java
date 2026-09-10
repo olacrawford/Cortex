@@ -54,6 +54,7 @@ public final class TeamMemberRunner implements Runnable {
         }
 
 
+        @CommandLine.Option(names = "--team-member") boolean teamMember;
         @CommandLine.Option(names = "--team", required = true) String team;
         @CommandLine.Option(names = "--member", required = true) String member;
         @CommandLine.Option(names = "--agent-id", required = true) String agentId;

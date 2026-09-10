@@ -205,10 +205,6 @@ public final class TeamManager implements TeamHook, com.cortex.task.TeamCollabor
             throw new TeamException("Team 装配未就绪（主 Agent 尚未初始化）");
         }
         Team team = get(req.teamName()).orElseThrow(() -> new TeamNotFoundException(req.teamName()));
-        if (team.backend().isPane()) {
-            throw new TeamException("Pane 后端（tmux/iterm2）的队员子进程自治模式（--team-member）本期未实现，"
-                    + "请在无 tmux 环境启动（自动选中 in-process）或用 TeamCreate 的 backend 参数显式指定 in-process");
-        }
         String memberName = req.memberName() == null || req.memberName().isBlank()
                 ? "member-" + String.format("%04x", ThreadLocalRandom.current().nextInt(0x10000))
                 : req.memberName().strip();
@@ -274,28 +270,42 @@ public final class TeamManager implements TeamHook, com.cortex.task.TeamCollabor
                     } catch (IOException ignored) {
                     }
                 });
-        subAgent.setTeammateContext(tc);
-        subAgent.setToolContext(ToolContext.EMPTY.withCwd(wt.path()).withTeammate(tc));
-
-        ConversationManager conv = new ConversationManager();
+        String agentId = team.backend().isPane()
+                ? String.format("agent-%014x", ThreadLocalRandom.current().nextLong()) : "";
+        agentIdRef.set(agentId);
         String taskText = req.prompt() == null ? "" : req.prompt();
 
-        // in-process：launch 生成 agentId（= BackgroundTask.id）
-        String agentId = backendFactory.create(team.backend()).spawn(new Backend.SpawnRequest(
-                team.sanitizedName(), memberName, "", wt.path().toString(),
-                sessionDir.toString(), typeName, req.model(), taskText,
-                planRequired, subAgent, conv, taskManager)).agentId();
-        agentIdRef.set(agentId);
+        String paneId = "";
+        if (team.backend().isPane()) {
+            // F13/F25-9：Pane 后端 initialPrompt 不走命令行——预写队员邮箱，子进程启动后自然读到
+            mailbox.write(agentId, new Message("lead", agentId, MessageType.TEXT,
+                    truncateForSummary(taskText), taskText, null, 0, false));
+            paneId = backendFactory.create(team.backend()).spawn(new Backend.SpawnRequest(
+                    team.sanitizedName(), memberName, agentId, wt.path().toString(),
+                    sessionDir.toString(), typeName, req.model(), "",
+                    planRequired, null, null, null)).paneId();
+        } else {
+            // in-process：构造子 Agent + 空白对话，taskText 直接作为 launch 任务
+            subAgent.setTeammateContext(tc);
+            subAgent.setToolContext(ToolContext.EMPTY.withCwd(wt.path()).withTeammate(tc));
+            var conv = new ConversationManager();
+            agentId = backendFactory.create(team.backend()).spawn(new Backend.SpawnRequest(
+                    team.sanitizedName(), memberName, agentId, wt.path().toString(),
+                    sessionDir.toString(), typeName, req.model(), taskText,
+                    planRequired, subAgent, conv, taskManager)).agentId();
+            agentIdRef.set(agentId);
+        }
 
         registry.register(memberName, agentId);
         team.addMember(new TeammateInfo(memberName, agentId, typeName,
                 req.model() == null ? "" : req.model(),
-                wt.path().toString(), wt.branch(), team.backend(), "",
+                wt.path().toString(), wt.branch(), team.backend(), paneId,
                 true, planRequired, sessionDir.toString()));
 
         return "{\"memberName\":\"" + memberName + "\",\"agentId\":\"" + agentId
                 + "\",\"worktree\":\"" + wt.path().toString().replace("\\", "\\\\")
-                + "\",\"backend\":\"" + team.backend().wireValue() + "\",\"paneId\":\"\"}";
+                + "\",\"backend\":\"" + team.backend().wireValue()
+                + "\",\"paneId\":\"" + paneId + "\"}";
     }
 
     // ─── 队员空闲通知（T30/F45/AC17）───
@@ -450,6 +460,16 @@ public final class TeamManager implements TeamHook, com.cortex.task.TeamCollabor
     }
 
     // ─── helpers ───
+
+    /** 初始任务的 mailbox summary（F13）：取前 8 个词。 */
+    public static String truncateForSummary(String prompt) {
+        if (prompt == null || prompt.isBlank()) {
+            return "new task";
+        }
+        String[] words = prompt.strip().split("\\s+");
+        return words.length <= 8 ? prompt.strip()
+                : String.join(" ", List.of(words).subList(0, 8)) + "…";
+    }
 
     /** 队员系统提示附录（F39）。 */
     public static String teamSystemPromptSuffix() {
