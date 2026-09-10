@@ -12,18 +12,14 @@ class BackendTest {
     // ── detect（注入 Env 控制环境变量）──
 
     @Test
-    void detect优先级() {
-        // $TMUX → TMUX
+    void detect优先级_Env注入() {
+        // $TMUX → TMUX（最高优先级）
         assertEquals(BackendType.TMUX, BackendDetector.detect(k -> "session"));
-        // iTerm.app 且 it2 在 PATH（本机 PATH 有无 it2 不确定 → 用真实 PATH 验证组合逻辑）
-        boolean it2OnPath = BackendDetector.findOnPath("it2").isPresent();
-        boolean tmuxOnPath = BackendDetector.findOnPath("tmux").isPresent();
-        assertEquals(it2OnPath ? BackendType.ITERM2 : (tmuxOnPath ? BackendType.TMUX : BackendType.IN_PROCESS),
-                BackendDetector.detect(k -> k.equals("TERM_PROGRAM") ? "iTerm.app" : null));
-        // tmux 在 PATH → TMUX（若本机有 tmux）；否则 IN_PROCESS
-        assertEquals(tmuxOnPath ? BackendType.TMUX : BackendType.IN_PROCESS,
-                BackendDetector.detect(k -> null));
-        // AC6 语义：任何 env 都没有 → 只看 PATH；PATH 也没有 → IN_PROCESS
+        // Env 全 null（含 PATH）→ 找不到任何二进制 → IN_PROCESS（确定性，与宿主机无关）
+        assertEquals(BackendType.IN_PROCESS, BackendDetector.detect(k -> null));
+        // iTerm 场景：TERM_PROGRAM=iTerm.app 但 PATH 为空 → 找不到 it2 → 回落（无 tmux → IN_PROCESS）
+        assertEquals(BackendType.IN_PROCESS, BackendDetector.detect(
+                k -> k.equals("TERM_PROGRAM") ? "iTerm.app" : null));
     }
 
     // ── tmux 命令构造 ──

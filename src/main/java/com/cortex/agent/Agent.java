@@ -274,7 +274,7 @@ public final class Agent {
         this.teammateContext = ctx;
     }
 
-    TeammateContext teammateContext() {
+    public TeammateContext teammateContext() {
         return teammateContext;
     }
 

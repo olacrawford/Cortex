@@ -16,22 +16,22 @@ class TeamManagerTest {
 
     private TeamManager mgr() throws Exception {
         return new TeamManager(tmp.resolve("home-" + System.nanoTime()), tmp, null, null,
-                new AgentNameRegistry(), null, "cortex.jar");
+                new AgentNameRegistry(), null, "cortex.jar", k -> null); // fake env → IN_PROCESS
     }
 
     @Test
     void 构造创建teams目录() throws Exception {
         Path home = tmp.resolve("home1");
-        new TeamManager(home, tmp, null, null, new AgentNameRegistry(), null, "cortex.jar");
+        new TeamManager(home, tmp, null, null, new AgentNameRegistry(), null, "cortex.jar", k -> null);
         assertTrue(Files.isDirectory(home.resolve(".cortex/teams")));
     }
 
     @Test
     void 启动扫描还原已有团队() throws Exception {
         Path home = tmp.resolve("home2");
-        TeamManager first = new TeamManager(home, tmp, null, null, new AgentNameRegistry(), null, "cortex.jar");
-        first.create("demo", "", BackendType.IN_PROCESS);
-        TeamManager second = new TeamManager(home, tmp, null, null, new AgentNameRegistry(), null, "cortex.jar");
+        TeamManager first = new TeamManager(home, tmp, null, null, new AgentNameRegistry(), null, "cortex.jar", k -> null);
+        first.create("demo", "");
+        TeamManager second = new TeamManager(home, tmp, null, null, new AgentNameRegistry(), null, "cortex.jar", k -> null);
         assertTrue(second.get("demo").isPresent(), "AC1：启动扫描还原 teams map");
         assertEquals(1, second.list().size());
     }
@@ -62,15 +62,15 @@ class TeamManagerTest {
         Path home = tmp.resolve("home3");
         Files.createDirectories(home.resolve(".cortex/teams/broken"));
         Files.writeString(home.resolve(".cortex/teams/broken/config.json"), "{bad");
-        TeamManager mgr = new TeamManager(home, tmp, null, null, new AgentNameRegistry(), null, "cortex.jar");
+        TeamManager mgr = new TeamManager(home, tmp, null, null, new AgentNameRegistry(), null, "cortex.jar", k -> null);
         assertTrue(mgr.list().isEmpty(), "F64：解析失败目录跳过不阻断");
     }
 
     @Test
     void delete有活跃成员拒绝_force放行() throws Exception {
         Path home = tmp.resolve("home4");
-        TeamManager mgr = new TeamManager(home, tmp, null, null, new AgentNameRegistry(), null, "cortex.jar");
-        Team t = mgr.create("demo", "", BackendType.IN_PROCESS);
+        TeamManager mgr = new TeamManager(home, tmp, null, null, new AgentNameRegistry(), null, "cortex.jar", k -> null);
+        Team t = mgr.create("demo", "");
         t.addMember(new TeammateInfo("alice", "agent-x", "general-purpose", "",
                 "", "", BackendType.IN_PROCESS, "", true, false, ""));
 

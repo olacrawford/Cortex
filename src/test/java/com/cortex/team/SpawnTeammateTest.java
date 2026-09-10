@@ -58,7 +58,7 @@ class SpawnTeammateTest {
         taskMgr.setNameRegistry(registry);
         Catalog catalog = Catalog.load(repo);
         TeamManager teamMgr = new TeamManager(tmp.resolve("home-" + System.nanoTime()), repo,
-                wtMgr, taskMgr, registry, catalog, "cortex.jar");
+                wtMgr, taskMgr, registry, catalog, "cortex.jar", k -> null); // fake env → IN_PROCESS
         // LeadEnv：脚本化客户端——队员第 1 轮直接文本收尾
         teamMgr.setLeadEnv(new TeamManager.LeadEnv(textClient(), new com.cortex.tool.ToolRegistry(),
                 "test", PermissionEngine.create(repo), 200000, repo, null));
@@ -68,7 +68,7 @@ class SpawnTeammateTest {
     @Test
     void spawn队员_worktree隔离_空闲通知_续写() throws Exception {
         Deps d = setup();
-        d.teamMgr().create("demo", "", BackendType.IN_PROCESS);
+        d.teamMgr().create("demo", "");
 
         String json = d.teamMgr().spawnTeammate(new com.cortex.agent.TeamHook.TeamSpawnRequest(
                 "demo", "随便做点事收个尾", "alice", "worker", null, null));
@@ -106,7 +106,7 @@ class SpawnTeammateTest {
     @Test
     void 未知角色spawn报错_重名报错() throws Exception {
         Deps d = setup();
-        d.teamMgr().create("demo", "", BackendType.IN_PROCESS);
+        d.teamMgr().create("demo", "");
         var e = assertThrows(TeamException.class,
                 () -> d.teamMgr().spawnTeammate(new com.cortex.agent.TeamHook.TeamSpawnRequest(
                         "demo", "任务", "eve", "ghost-type", null, null)));
@@ -122,7 +122,7 @@ class SpawnTeammateTest {
     @Test
     void 队员调SendMessage_to_lead写入lead邮箱() throws Exception {
         Deps d = setup();
-        d.teamMgr().create("demo", "", BackendType.IN_PROCESS);
+        d.teamMgr().create("demo", "");
         // 队员脚本：第 1 轮调 SendMessage(to=lead)，第 2 轮文本收尾
         java.util.concurrent.atomic.AtomicBoolean called = new java.util.concurrent.atomic.AtomicBoolean();
         com.cortex.llm.LlmClient client = req -> {
@@ -160,9 +160,16 @@ class SpawnTeammateTest {
     @Test
     void pane后端spawn被拒() throws Exception {
         Deps d = setup();
-        Team t = d.teamMgr().create("pane-demo", "", BackendType.TMUX);
+        // TMUX env → detect 为 TMUX（确定性）
+        TeamManager tmuxMgr = new TeamManager(tmp.resolve("home-pane"), d.repo(), d.wtMgr(),
+                d.taskMgr(), d.registry(), Catalog.load(d.repo()), "cortex.jar", k -> "session");
+        tmuxMgr.setLeadEnv(new TeamManager.LeadEnv(textClient(),
+                new com.cortex.tool.ToolRegistry(), "test",
+                PermissionEngine.create(d.repo()), 200000, d.repo(), null));
+        Team t = tmuxMgr.create("pane-demo", "");
+        assertEquals(BackendType.TMUX, t.backend(), "TMUX env → pane 后端");
         TeamException e = assertThrows(TeamException.class,
-                () -> d.teamMgr().spawnTeammate(new com.cortex.agent.TeamHook.TeamSpawnRequest(
+                () -> tmuxMgr.spawnTeammate(new com.cortex.agent.TeamHook.TeamSpawnRequest(
                         t.sanitizedName(), "任务", "carol", "worker", null, null)));
         assertTrue(e.getMessage().contains("未实现"));
     }
@@ -172,11 +179,11 @@ class SpawnTeammateTest {
         Path home = tmp.resolve("home-nowt");
         Manager taskMgr = new Manager();
         TeamManager teamMgr = new TeamManager(home, tmp, null, taskMgr,
-                new AgentNameRegistry(), Catalog.load(tmp), "cortex.jar");
+                new AgentNameRegistry(), Catalog.load(tmp), "cortex.jar", k -> null);
         teamMgr.setLeadEnv(new TeamManager.LeadEnv(
                 req -> new LinkedBlockingQueue<>(), new com.cortex.tool.ToolRegistry(),
                 "t", PermissionEngine.create(tmp), 200000, tmp, null));
-        teamMgr.create("demo", "", BackendType.IN_PROCESS);
+        teamMgr.create("demo", "");
         TeamException e = assertThrows(TeamException.class,
                 () -> teamMgr.spawnTeammate(new com.cortex.agent.TeamHook.TeamSpawnRequest(
                         "demo", "任务", "dave", "general-purpose", null, null)));

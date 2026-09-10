@@ -125,6 +125,9 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
     private final com.cortex.team.TeamManager teamMgr;
     private final boolean coordinatorMode;
     private final String cortexJar;
+    /** F41b：Lead 邮箱信号队列（cap=1，合并重复信号）；waiter 收到后自动唤醒开轮。 */
+    private final java.util.concurrent.LinkedBlockingQueue<Object> leadMailQueue =
+            new java.util.concurrent.LinkedBlockingQueue<>(1);
 
     private AppState state = AppState.CHAT;
     private int width = 80;
@@ -265,6 +268,40 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
         // 阶段14：Lead 邮箱轮询（F41a）——队员消息 1s 内进 pendingReminders，下一轮 Run 自然取出
         if (teamMgr != null) {
             Thread.ofVirtual().name("lead-mail-watcher").start(this::consumeLeadMail);
+            // F41b：空闲自动唤醒——Lead 空闲时收到信号即合成 user 消息开新轮
+            Thread.ofVirtual().name("lead-mail-waiter").start(this::waitLeadMail);
+        }
+    }
+
+    /** F41b：阻塞消费唤醒信号，经 GUI 事件线程转 LeadMailEvent。 */
+    private void waitLeadMail() {
+        while (true) {
+            try {
+                leadMailQueue.take();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+            if (program != null) {
+                program.send(new com.cortex.tui.tea.LeadMailEvent());
+            }
+        }
+    }
+
+    /** F41b：Lead 空闲时合成 user 消息自动开轮（非空闲则 reminder 已在队列，Run 下一轮自然取出）。 */
+    private void handleLeadMailEvent() {
+        if (!idle() || pending != null) {
+            return; // 非空闲：pendingReminders 已积累，当前/下一轮自然取出
+        }
+        String text = "[team-update] 队员发来新消息，请按团队协作流程处理（先读 reminder 中的内容再决定行动）";
+        conversation.addUserMessage(text);
+        String userLine = Styles.USER_PREFIX.apply("❯ ") + text;
+        committed.add(userLine);
+        cmdOutputs.clear();
+        cmdOutputs.add(Command.println(userLine));
+        cmdOutputs.add(beginTurn());
+        if (program != null) {
+            program.send(new com.cortex.tui.tea.StreamTickMessage());
         }
     }
 
@@ -287,6 +324,7 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
                 }
                 sb.append("</team-update>");
                 runtime.appendReminders(List.of(sb.toString()));
+                leadMailQueue.offer(new Object()); // F41b：非阻塞信号（cap=1 合并重复）
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -415,6 +453,10 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
         }
         if (msg instanceof CompactNoticeMessage notice) {
             return pushSystemMessage(notice.text());
+        }
+        if (msg instanceof com.cortex.tui.tea.LeadMailEvent) {
+            handleLeadMailEvent();
+            return new UpdateResult<>(this, null);
         }
         if (msg instanceof com.cortex.tui.tea.SubAgentApprovalMessage) {
             // 子 Agent 审批请求已抢占 pending：仅重绘 view 显示弹窗（F13）

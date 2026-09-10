@@ -57,16 +57,27 @@ public final class TeamManager implements TeamHook, com.cortex.task.TeamCollabor
     private final Map<String, Team> teams = new LinkedHashMap<>(); // sanitized → Team
     private volatile LeadEnv leadEnv;
     private final Catalog agentCatalog;
+    private final BackendDetector.Env env;
 
     public TeamManager(Path homeDir, Path projectRoot, WorktreeManager worktreeManager,
                        Manager taskManager, AgentNameRegistry registry,
                        Catalog agentCatalog, String cortexJar) throws IOException {
+        this(homeDir, projectRoot, worktreeManager, taskManager, registry, agentCatalog,
+                cortexJar, System::getenv);
+    }
+
+    /** Env 注入构造（T11：测试可控后端检测）。 */
+    public TeamManager(Path homeDir, Path projectRoot, WorktreeManager worktreeManager,
+                       Manager taskManager, AgentNameRegistry registry,
+                       Catalog agentCatalog, String cortexJar,
+                       BackendDetector.Env env) throws IOException {
         this.teamsDir = homeDir.resolve(".cortex").resolve("teams");
         this.projectRoot = projectRoot.toAbsolutePath().normalize();
         this.worktreeManager = worktreeManager;
         this.taskManager = taskManager;
         this.registry = registry;
         this.agentCatalog = agentCatalog;
+        this.env = env;
         this.backendFactory = new BackendFactory(cortexJar, taskManager);
         Files.createDirectories(teamsDir);
         restoreFromDisk();
@@ -103,11 +114,6 @@ public final class TeamManager implements TeamHook, com.cortex.task.TeamCollabor
     // ─── 创建（F5/AC2/AC3）───
 
     public Team create(String name, String description) throws IOException {
-        return create(name, description, null);
-    }
-
-    /** create 带 BackendType 覆盖（TeamCreate 工具可选 backend 参数，调试/E2E 用；null = 检测）。 */
-    public Team create(String name, String description, BackendType overrideBackend) throws IOException {
         String sanitized = Persistence.sanitize(name);
         if (sanitized.isEmpty()) {
             throw new TeamException("团队名清洗后为空: " + name);
@@ -119,7 +125,7 @@ public final class TeamManager implements TeamHook, com.cortex.task.TeamCollabor
             while (teams.containsKey(unique)) { // AC3：同名自动 -2/-3
                 unique = sanitized + "-" + suffix++;
             }
-            BackendType backend = overrideBackend != null ? overrideBackend : BackendDetector.detect();
+            BackendType backend = BackendDetector.detect(env);
             Path configDir = teamsDir.resolve(unique);
             Files.createDirectories(configDir);
             Files.createDirectories(configDir.resolve("mailbox"));
@@ -478,7 +484,8 @@ public final class TeamManager implements TeamHook, com.cortex.task.TeamCollabor
                 </team-context>""".formatted(team.sanitizedName(), memberName, worktree, members);
     }
 
-    private static TeammateContext.IncomingMessage toIncoming(Message m) {
+    /** Message → 队员闭包轻量消息（cli.TeamMemberRunner 复用）。 */
+    public static TeammateContext.IncomingMessage toIncoming(Message m) {
         return new TeammateContext.IncomingMessage(m.from(), m.type().wire(),
                 m.summary(), m.content(),
                 m.payload() == null ? null : m.payload().approve(),
