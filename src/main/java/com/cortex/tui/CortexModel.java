@@ -10,6 +10,7 @@ import com.cortex.agent.Phase;
 import com.cortex.agent.SessionRuntime;
 import com.cortex.agent.ToolEvent;
 import com.cortex.command.Builtins;
+import com.cortex.command.TeamAccessor;
 import com.cortex.command.WorktreeAccessor;
 import com.cortex.command.CommandRegistry;
 import com.cortex.command.Dispatch;
@@ -120,6 +121,11 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
     private final com.cortex.worktree.WorktreeManager worktreeMgr;
     private volatile java.nio.file.Path activeCwd;
 
+    // Agent Team（阶段14）：管理器可空 = 未装配；coordinatorMode 双锁开启后 Lead 工具收窄
+    private final com.cortex.team.TeamManager teamMgr;
+    private final boolean coordinatorMode;
+    private final String cortexJar;
+
     private AppState state = AppState.CHAT;
     private int width = 80;
 
@@ -200,6 +206,20 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
                        SkillCatalog skillCatalog, com.cortex.hook.HookEngine hookEngine,
                        com.cortex.task.Manager taskMgr, com.cortex.agent.AgentTool agentTool,
                        com.cortex.worktree.WorktreeManager worktreeMgr) {
+        this(providers, registry, engine, runtime, writer, memMgr, instructionText, memoryText,
+                sessionsDir, skillCatalog, hookEngine, taskMgr, agentTool, worktreeMgr,
+                null, null, false);
+    }
+
+    /** 阶段14 全参构造：再接收 Team 管理器与 Coordinator 标记（均可空/false = 未启用）。 */
+    public CortexModel(List<ProviderConfig> providers, ToolRegistry registry, PermissionEngine engine,
+                       SessionRuntime runtime, Writer writer, Manager memMgr,
+                       String instructionText, String memoryText, Path sessionsDir,
+                       SkillCatalog skillCatalog, com.cortex.hook.HookEngine hookEngine,
+                       com.cortex.task.Manager taskMgr, com.cortex.agent.AgentTool agentTool,
+                       com.cortex.worktree.WorktreeManager worktreeMgr,
+                       com.cortex.team.TeamManager teamMgr, String cortexJar,
+                       boolean coordinatorMode) {
         this.providers = providers;
         this.registry = registry;
         this.engine = engine;
@@ -214,6 +234,9 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
         this.taskMgr = taskMgr;
         this.agentTool = agentTool;
         this.worktreeMgr = worktreeMgr;
+        this.teamMgr = teamMgr;
+        this.cortexJar = cortexJar;
+        this.coordinatorMode = coordinatorMode;
         // 阶段11：hook 引擎挂到 runtime，供 Agent 各 emit 点读取
         if (hookEngine != null) {
             runtime.hookEngine = hookEngine;
@@ -239,6 +262,46 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
         if (worktreeMgr != null && worktreeMgr.currentSession() != null) {
             activeCwd = java.nio.file.Path.of(worktreeMgr.currentSession().worktreePath());
         }
+        // 阶段14：Lead 邮箱轮询（F41a）——队员消息 1s 内进 pendingReminders，下一轮 Run 自然取出
+        if (teamMgr != null) {
+            Thread.ofVirtual().name("lead-mail-watcher").start(this::consumeLeadMail);
+        }
+    }
+
+    /** Lead 邮箱轮询（F41a/T30b）：每秒读全部 Team 的 lead 邮箱 → <team-update> reminder。 */
+    private void consumeLeadMail() {
+        try {
+            while (true) {
+                Thread.sleep(1000);
+                var messages = teamMgr.pollLeadMailboxes();
+                if (messages.isEmpty()) {
+                    continue;
+                }
+                StringBuilder sb = new StringBuilder("<team-update>\n队员发来 ").append(messages.size())
+                        .append(" 条新消息:\n");
+                for (var m : messages) {
+                    String content = m.content() == null ? "" : m.content();
+                    sb.append("[").append(m.teamName()).append("] 来自 ").append(m.from())
+                            .append(": ").append(m.summary()).append("\n    ")
+                            .append(content, 0, Math.min(8000, content.length())).append("\n");
+                }
+                sb.append("</team-update>");
+                runtime.appendReminders(List.of(sb.toString()));
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    // ─── Agent Team（阶段14）───
+
+    /** /team 命令的管理能力入口（F59-F62）；未装配返回 null。 */
+    @Override
+    public TeamAccessor teamAccessor() {
+        if (teamMgr == null) {
+            return null;
+        }
+        return new TuiTeamAccessor(teamMgr, cortexJar);
     }
 
     // ─── Worktree 隔离（阶段13）───
@@ -584,6 +647,24 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
         // 阶段12：Agent 工具回填主 Agent 引用（provider 可重选，activate 时刷新，T29）
         if (agentTool != null) {
             agentTool.setParent(agent);
+        }
+        // 阶段14：主 Agent 工具收窄——Coordinator Mode 用白名单；否则仅隐藏 Team 专属工具（AC9/N1）
+        java.util.Set<String> allowed;
+        if (coordinatorMode) {
+            allowed = java.util.Set.copyOf(com.cortex.coordinator.Coordinator.ALLOWED_TOOLS);
+        } else {
+            allowed = new java.util.HashSet<>(registry.definitions().stream()
+                    .map(com.cortex.llm.ToolDef::name).toList());
+            allowed.removeAll(com.cortex.tool.Filter.TEAMMATE_TOOLS);
+        }
+        agent.setAllowedTools(allowed);
+        if (coordinatorMode) {
+            agent.appendSystemPrompt(com.cortex.coordinator.Coordinator.systemPromptSuffix());
+        }
+        // 阶段14：Team 装配环境回填（队员子 Agent 构造来源）
+        if (teamMgr != null) {
+            teamMgr.setLeadEnv(new com.cortex.team.TeamManager.LeadEnv(client, registry,
+                    Prompt.VERSION, engine, runtime.contextWindow, workspaceRoot(), hookEngine));
         }
         if (memMgr != null) {
             memMgr.setProvider(client, provider.getModel());
@@ -1060,13 +1141,16 @@ public class CortexModel implements Model, com.cortex.command.Ui, com.cortex.ski
     }
 
     private String statusBar() {
-        // 左侧常驻显示当前权限模式（取代 provider 名，F7/AC9）
+        // 左侧常驻显示当前权限模式（取代 provider 名，F7/AC9）；Coordinator 模式追加标签（F54/AC21）
         String left = switch (mode) {
             case DEFAULT -> Styles.SELECT_IDLE.apply("DEFAULT");
             case ACCEPT_EDITS -> Styles.SELECT_ACTIVE.apply("ACCEPT EDITS");
             case PLAN -> Styles.SPINNER.apply("PLAN");
             case BYPASS -> Styles.ERROR.apply("BYPASS");
         };
+        if (coordinatorMode) {
+            left += Styles.ERROR.apply(" [COORDINATOR]");
+        }
         String model = activeProvider != null ? activeProvider.getModel() : "";
         if (usageIn > 0 || usageOut > 0) {
             model += "  ↑" + compact(usageIn) + " ↓" + compact(usageOut) + " tok";

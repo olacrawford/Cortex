@@ -14,9 +14,15 @@ import java.util.Map;
 public final class TaskListTool implements Tool {
 
     private final Manager manager;
+    private final TeamCollaboration collaboration; // 阶段14：队员上下文分派（可空）
 
     public TaskListTool(Manager manager) {
+        this(manager, null);
+    }
+
+    public TaskListTool(Manager manager, TeamCollaboration collaboration) {
         this.manager = manager;
+        this.collaboration = collaboration;
     }
 
     @Override
@@ -41,6 +47,20 @@ public final class TaskListTool implements Tool {
 
     @Override
     public Result execute(String argsJson) {
+        return execute(com.cortex.tool.ToolContext.EMPTY, argsJson);
+    }
+
+    @Override
+    public Result execute(com.cortex.tool.ToolContext ctx, String argsJson) {
+        // Team 队员上下文：共享任务列表（F28）
+        if (ctx.teammate() instanceof com.cortex.agent.TeammateContext tc && collaboration != null) {
+            try {
+                return Result.ok(collaboration.taskList(tc.teamName(),
+                        TaskGetTool.stringArg(argsJson, "status")));
+            } catch (Exception e) {
+                return Result.error(e.getMessage() != null ? e.getMessage() : e.toString());
+            }
+        }
         List<Map<String, Object>> items = new ArrayList<>();
         for (BackgroundTask t : manager.list()) {
             Map<String, Object> item = new java.util.TreeMap<>();

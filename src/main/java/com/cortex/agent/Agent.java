@@ -91,8 +91,11 @@ public final class Agent {
     private final boolean subAgentModeSet;       // 区分「未设置」与 DEFAULT
     private final boolean dontAsk;               // 规则未命中的 Ask 决策自动放行
     private final ApprovalUpgrader approvalUpgrader; // 审批升级到父 TUI 的回调（可空）
-    private final java.util.Set<String> allowedTools; // 工具白名单；空 = 不收窄（F30）
+    private volatile java.util.Set<String> allowedTools; // 工具白名单；空 = 不收窄（F30）
     private final boolean forkContext;           // Fork/skill-fork 子 Agent 标记（嵌套阻断 QuerySource）
+    // ─── 阶段14 Team 扩展 ───
+    private volatile TeammateContext teammateContext; // 队员上下文（Team spawn 注入；可空）
+    private volatile Mode overrideMode;          // plan 审批通过后的模式切换（TeamMailboxIngestor）
     /** 当前 run/runToCompletion 的对话；Agent 工具 fork 时取父消息用（F22）。 */
     private volatile ConversationManager activeConv;
     /** 工具执行现场的调用方 Agent（QuerySource 嵌套检测，F24）；executeTool 包装器设置/清理。 */
@@ -264,6 +267,36 @@ public final class Agent {
         this.toolContext = ctx == null ? ToolContext.EMPTY : ctx;
     }
 
+    // ─── 阶段14 Team ───
+
+    /** 注入队员上下文（TeamManager.spawnTeammate 用）；null 清除。 */
+    public void setTeammateContext(TeammateContext ctx) {
+        this.teammateContext = ctx;
+    }
+
+    TeammateContext teammateContext() {
+        return teammateContext;
+    }
+
+    /** 运行中收窄 allowedTools（Coordinator Mode 的 Lead 收窄用，N8 单向）。 */
+    public void setAllowedTools(java.util.Set<String> allowed) {
+        this.allowedTools = allowed == null ? java.util.Set.of() : java.util.Set.copyOf(allowed);
+    }
+
+    /** 追加系统提示段（Coordinator Mode 提示词，F54）；多次调用按序拼接。 */
+    public void appendSystemPrompt(String extra) {
+        if (extra != null && !extra.isBlank()) {
+            this.appendedSystemPrompt.append(extra.strip()).append("\n\n");
+        }
+    }
+
+    private final StringBuilder appendedSystemPrompt = new StringBuilder();
+
+    /** plan 审批通过后的权限模式切换（TeamMailboxIngestor 调用，F44/T32）。 */
+    public void setPermissionMode(Mode m) {
+        this.overrideMode = m;
+    }
+
     ToolContext toolContext() {
         return toolContext;
     }
@@ -298,6 +331,7 @@ public final class Agent {
     public BlockingQueue<AgentEvent> run(ConversationManager conv, Mode mode, CancelToken cancel) {
         BlockingQueue<AgentEvent> out = new LinkedBlockingQueue<>();
         activeConv = conv; // 阶段12：Agent 工具 fork 时读取父消息（F22）
+        // 阶段14：Coordinator 提示词等追加段（activate 时注入，跨轮生效）
         Thread.ofVirtual().name("agent-loop").start(() -> {
             runLock.lock();
             try {
@@ -398,7 +432,9 @@ public final class Agent {
             throws InterruptedException {
         // 环境信息（不缓存）与稳定系统提示（可缓存）在 run 起始构造一次，跨轮复用（F2/F3/N1）
         String envText = Environment.gather(this.version, "").render();
-        String sys = Prompt.buildSystemPrompt(instructionText, memoryText);
+        String sys = appendedSystemPrompt.isEmpty()
+                ? Prompt.buildSystemPrompt(instructionText, memoryText)
+                : Prompt.buildSystemPrompt(instructionText, memoryText) + "\n\n" + appendedSystemPrompt.toString().strip();
         List<ToolDef> defs = definitionsFor(mode);
 
         int unknownRun = 0;
@@ -509,7 +545,8 @@ public final class Agent {
             conv.addUserMessage(task);
         }
         activeConv = conv;
-        Mode mode = subAgentModeSet ? subAgentMode : Mode.DEFAULT;
+        Mode mode = overrideMode != null ? overrideMode
+                : (subAgentModeSet ? subAgentMode : Mode.DEFAULT);
         String envText = Environment.gather(this.version, "").render();
         // systemPrompt 非空 = 角色 prompt 覆盖（定义式）；空 = 继承主 Agent 系统提示（Fork，N2 缓存一致）
         String sys = systemPromptOverride == null || systemPromptOverride.isBlank()
@@ -523,6 +560,10 @@ public final class Agent {
             if (cancel.isCancelled()) {
                 ensureAssistantTail(conv, NOTICE_CANCELLED);
                 throw new java.util.concurrent.CancellationException();
+            }
+            // 阶段14：队员每轮请求 LLM 前读邮箱，未读消息以 <incoming-messages> reminder 注入（F41）
+            if (teammateContext != null) {
+                TeamMailboxIngestor.ingest(this, teammateContext);
             }
             emit(events, cancel, new AgentEvent.Iter(iter));
 

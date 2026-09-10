@@ -14,6 +14,7 @@ class BuiltinsTest {
     /** 可观测桩：委托 NopUi 并记录调用。 */
     private static class RecordingUi implements Ui {
         @Override public com.cortex.command.WorktreeAccessor worktreeAccessor() { return null; }
+        @Override public com.cortex.command.TeamAccessor teamAccessor() { return null; }
         final List<String> prints = new ArrayList<>();
         final List<String> errors = new ArrayList<>();
         Mode mode = Mode.PLAN;
@@ -134,16 +135,16 @@ class BuiltinsTest {
         return reg;
     }
 
-    private static final List<String> ALL_15 = List.of(
+    private static final List<String> ALL_16 = List.of(
             "clear", "compact", "do", "exit", "help", "hooks", "memory",
-            "permission", "plan", "resume", "review", "session", "skills", "status", "worktree");
+            "permission", "plan", "resume", "review", "session", "skills", "status", "team", "worktree");
 
     @Test
-    void registerAll_allRegistered_恰好15条全小写() {
+    void registerAll_allRegistered_恰好16条全小写() {
         CommandRegistry reg = newRegistry();
-        assertEquals(15, reg.visible().size());
+        assertEquals(16, reg.visible().size());
         List<String> names = reg.visible().stream().map(Command::name).toList();
-        assertEquals(ALL_15, names);
+        assertEquals(ALL_16, names);
         for (String n : names) {
             assertEquals(n, n.toLowerCase(), "命令名必须全小写");
         }
@@ -226,7 +227,7 @@ class BuiltinsTest {
         RecordingUi ui = new RecordingUi();
         reg.lookup("help").orElseThrow().handler().handle(ui, "");
         assertEquals(1, ui.prints.size());
-        for (String n : ALL_15) {
+        for (String n : ALL_16) {
             assertTrue(ui.prints.get(0).contains("/" + n), "缺命令: " + n);
         }
     }

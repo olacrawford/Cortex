@@ -38,6 +38,9 @@ public final class Manager implements TaskManagerPort {
     private final AtomicLong seq = new AtomicLong();
     /** 审批转发器（CortexModel 注入）：把子 Agent 的 ApprovalRequest 转发到主 TUI（F13）。 */
     private volatile Function<ApprovalRequest, Optional<Outcome>> approvalForwarder;
+    /** 阶段14：统一命名注册表（可空兜底本地 byName）；任务完成回调（Team 空闲通知用，T21/T30）。 */
+    private volatile com.cortex.team.AgentNameRegistry nameRegistry;
+    private final List<java.util.function.Consumer<String>> taskDoneCallbacks = new ArrayList<>();
 
     public Manager() {
     }
@@ -45,6 +48,16 @@ public final class Manager implements TaskManagerPort {
     /** 注入审批转发器（F13）；null 清除。 */
     public void setApprovalForwarder(Function<ApprovalRequest, Optional<Outcome>> forwarder) {
         this.approvalForwarder = forwarder;
+    }
+
+    /** 阶段14：注入统一命名注册表（launch 时同步注册 name→id）。 */
+    public void setNameRegistry(com.cortex.team.AgentNameRegistry registry) {
+        this.nameRegistry = registry;
+    }
+
+    /** 阶段14：注册任务完成回调（Team 空闲通知等）；在终态写盘后逐个触发。 */
+    public synchronized void onTaskDone(java.util.function.Consumer<String> callback) {
+        taskDoneCallbacks.add(callback);
     }
 
     /** done 队列：TUI 的 consumeTaskDone 虚拟线程阻塞消费（F16/F19）。 */
@@ -70,6 +83,10 @@ public final class Manager implements TaskManagerPort {
         tasks.put(id, bt);
         if (bt.name() != null) {
             byName.put(bt.name(), id); // 后启动覆盖前（F1）
+            com.cortex.team.AgentNameRegistry reg = nameRegistry;
+            if (reg != null) {
+                reg.register(bt.name(), id); // 阶段14：统一注册表同步（F37）
+            }
         }
         Thread.ofVirtual().name("subagent-" + id).start(() -> runTask(bt, task));
         return bt;
@@ -98,6 +115,13 @@ public final class Manager implements TaskManagerPort {
             if (!doneQueue.offer(bt.id())) {
                 System.err.printf("task manager: done 队列已满，丢弃任务通知 %s%n", bt.id());
             }
+            for (java.util.function.Consumer<String> cb : taskDoneCallbacks) {
+                try {
+                    cb.accept(bt.id());
+                } catch (Exception e) {
+                    System.err.printf("task manager: onTaskDone 回调失败: %s%n", e.getMessage());
+                }
+            }
         }
     }
 
@@ -123,6 +147,9 @@ public final class Manager implements TaskManagerPort {
     /** 按名找仍存活的已完成任务并续派新消息（F20/SendMessage）。 */
     public synchronized String sendMessage(String name, String message) {
         String id = byName.get(name);
+        if (id == null && nameRegistry != null) {
+            id = nameRegistry.resolve(name).orElse(null);
+        }
         if (id == null) {
             throw new IllegalStateException("未找到名为 " + name + " 的后台任务");
         }

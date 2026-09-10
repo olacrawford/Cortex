@@ -60,6 +60,11 @@ public final class Sandbox {
         } catch (IOException e) {
             return false;
         }
-        return resolved.equals(root) || resolved.startsWith(root);
+        if (resolved.equals(root) || resolved.startsWith(root)) {
+            return true;
+        }
+        // 阶段14 N9 白名单：系统临时目录 /tmp 与 macOS 真实路径 /private/tmp（逃逸检测已先行）
+        return resolved.startsWith(java.nio.file.Path.of(java.io.File.separator, "tmp"))
+                || resolved.startsWith(java.nio.file.Path.of(java.io.File.separator, "private", "tmp"));
     }
 }

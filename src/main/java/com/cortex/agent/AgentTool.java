@@ -43,19 +43,27 @@ public final class AgentTool implements Tool {
     private final TaskManagerPort taskMgr;
     private final boolean bgEnabled;      // N6 配置开关 enableSubAgentBackground
     private final WorktreeManager wtMgr;  // 阶段13：isolation:worktree 用；null = Worktree 未启用
+    private final TeamHook teamHook;      // 阶段14：teamName 派队分支；null = Team 未装配
     private volatile Agent parent;        // 主 Agent（provider/registry/engine/runtime 来源）
 
     public AgentTool(AgentCatalogPort catalog, TaskManagerPort taskMgr, boolean bgEnabled) {
-        this(catalog, taskMgr, bgEnabled, null);
+        this(catalog, taskMgr, bgEnabled, null, null);
     }
 
     /** 阶段13：wtMgr 允许 null（非 git 仓库等场景降级，isolation 请求报错）。 */
     public AgentTool(AgentCatalogPort catalog, TaskManagerPort taskMgr, boolean bgEnabled,
                      WorktreeManager wtMgr) {
+        this(catalog, taskMgr, bgEnabled, wtMgr, null);
+    }
+
+    /** 阶段14：teamHook 允许 null（Team 未装配，teamName 请求报错）。 */
+    public AgentTool(AgentCatalogPort catalog, TaskManagerPort taskMgr, boolean bgEnabled,
+                     WorktreeManager wtMgr, TeamHook teamHook) {
         this.catalog = catalog;
         this.taskMgr = taskMgr;
         this.bgEnabled = bgEnabled;
         this.wtMgr = wtMgr;
+        this.teamHook = teamHook;
     }
 
     /** 主 Agent 就绪后回填（多 provider 选择 / activate 之后，T29）。 */
@@ -111,7 +119,11 @@ public final class AgentTool implements Tool {
                         "run_in_background", Map.of("type", "boolean",
                                 "description", "true 时后台启动，立即返回 task_id"),
                         "name", Map.of("type", "string",
-                                "description", "给本次子 Agent 命名，供 SendMessage 续派；同名后启动覆盖前者")),
+                                "description", "给本次子 Agent 命名，供 SendMessage 续派；同名后启动覆盖前者"),
+                        "teamName", Map.of("type", "string",
+                                "description", "非空时把子任务派给该团队的队员（Team spawn，异步执行并保留 worktree）"),
+                        "planModeRequired", Map.of("type", "boolean",
+                                "description", "队员以 PLAN 模式起步：先出计划给 Lead 审批，通过后再执行（仅 Team 分支生效）")),
                 "required", List.of("prompt", "description"));
     }
 
@@ -127,6 +139,9 @@ public final class AgentTool implements Tool {
         String description = text(args, "description");
         String subagentType = text(args, "subagent_type");
         String name = text(args, "name");
+        String teamName = text(args, "teamName");
+        boolean planModeRequired = args.has("planModeRequired") && args.get("planModeRequired").isBoolean()
+                && args.get("planModeRequired").asBoolean();
         boolean runInBackground = args.has("run_in_background") && args.get("run_in_background").isBoolean()
                 && args.get("run_in_background").asBoolean();
 
@@ -149,6 +164,26 @@ public final class AgentTool implements Tool {
                         && Fork.isForkContext(caller.currentConversation().getMessages()));
             if (forkCaller) {
                 return Result.error("Fork 子 Agent 不能再启动 Agent");
+            }
+        }
+
+        // ── 阶段14：Team spawn 分支（F25）──
+        if (teamName != null && !teamName.isBlank()) {
+            if (teamHook == null) {
+                return Result.error("Team 功能未装配");
+            }
+            // in-process 队员不能再派队（AC8/F25-2）
+            Agent callerCtx = Agent.currentCaller();
+            if (callerCtx != null && callerCtx.teammateContext() != null) {
+                return Result.error(new com.cortex.team.InProcessTeammateNoSpawnException(
+                        callerCtx.teammateContext().memberName()).getMessage());
+            }
+            try {
+                return Result.ok(teamHook.spawnTeammate(new TeamHook.TeamSpawnRequest(
+                        teamName.strip(), prompt, name, subagentType, text(args, "model"),
+                        planModeRequired)));
+            } catch (Exception e) {
+                return Result.error(e.getMessage() != null ? e.getMessage() : e.toString());
             }
         }
 

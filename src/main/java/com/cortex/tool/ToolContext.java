@@ -14,14 +14,31 @@ public final class ToolContext {
     public static final ToolContext EMPTY = new ToolContext(null);
 
     private final Path cwd; // 可空；非空时已 toAbsolutePath+normalize
+    /** Team 队员上下文（阶段14，不透明载体；工具层按需转型，tool 包不依赖 agent 包）。 */
+    private final Object teammate;
 
     public ToolContext(Path cwd) {
+        this(cwd, null);
+    }
+
+    public ToolContext(Path cwd, Object teammate) {
         this.cwd = cwd == null ? null : cwd.toAbsolutePath().normalize();
+        this.teammate = teammate;
     }
 
     /** 返回带 explicit cwd 的新 ctx。 */
     public ToolContext withCwd(Path dir) {
-        return new ToolContext(dir);
+        return new ToolContext(dir, teammate);
+    }
+
+    /** 返回带 Team 队员上下文的新 ctx（不透明载体，阶段14）。 */
+    public ToolContext withTeammate(Object teammate) {
+        return new ToolContext(cwd, teammate);
+    }
+
+    /** Team 队员上下文（可空；工具层按需转型）。 */
+    public Object teammate() {
+        return teammate;
     }
 
     /** explicit cwd（可空——空表示回落 JVM 当前目录）。 */
