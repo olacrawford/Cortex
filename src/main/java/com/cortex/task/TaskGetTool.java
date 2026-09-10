@@ -12,9 +12,15 @@ import java.util.TreeMap;
 public final class TaskGetTool implements Tool {
 
     private final Manager manager;
+    private final TeamCollaboration collaboration; // 阶段14：队员上下文分派（可空）
 
     public TaskGetTool(Manager manager) {
+        this(manager, null);
+    }
+
+    public TaskGetTool(Manager manager, TeamCollaboration collaboration) {
         this.manager = manager;
+        this.collaboration = collaboration;
     }
 
     @Override
@@ -43,6 +49,22 @@ public final class TaskGetTool implements Tool {
 
     @Override
     public Result execute(String argsJson) {
+        return execute(com.cortex.tool.ToolContext.EMPTY, argsJson);
+    }
+
+    @Override
+    public Result execute(com.cortex.tool.ToolContext ctx, String argsJson) {
+        // Team 队员上下文：共享任务详情（F27）
+        if (ctx.teammate() instanceof com.cortex.agent.TeammateContext tc && collaboration != null) {
+            String teamTaskId = stringArg(argsJson, "task_id");
+            String altId = stringArg(argsJson, "taskId");
+            String id = teamTaskId != null ? teamTaskId : altId;
+            try {
+                return Result.ok(collaboration.taskGet(tc.teamName(), id));
+            } catch (Exception e) {
+                return Result.error(e.getMessage() != null ? e.getMessage() : e.toString());
+            }
+        }
         String id = stringArg(argsJson, "task_id");
         if (id == null || id.isBlank()) {
             return Result.error("缺少必填参数 task_id");

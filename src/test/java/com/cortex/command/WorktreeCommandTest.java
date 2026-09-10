@@ -43,6 +43,7 @@ class WorktreeCommandTest {
         @Override public List<String> hookLines() { return List.of(); }
         @Override public List<String> hookSources() { return List.of(); }
         @Override public WorktreeAccessor worktreeAccessor() { return accessor; }
+        @Override public TeamAccessor teamAccessor() { return null; }
         @Override public void quit() {}
         @Override public void forceCompact() {}
         @Override public void openResumeMenu() {}

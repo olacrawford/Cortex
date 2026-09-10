@@ -61,6 +61,9 @@ public interface Ui {
     /** Worktree 管理能力（阶段13 /worktree 用）；未启用（非 git 仓库等）返回 null。 */
     WorktreeAccessor worktreeAccessor();
 
+    /** Team 管理能力（阶段14 /team 用）；未装配返回 null。 */
+    TeamAccessor teamAccessor();
+
     // ─── 影响界面动作 ───
     void quit();
 
@@ -154,6 +157,11 @@ public interface Ui {
 
         @Override
         public WorktreeAccessor worktreeAccessor() {
+            return null;
+        }
+
+        @Override
+        public TeamAccessor teamAccessor() {
             return null;
         }
 

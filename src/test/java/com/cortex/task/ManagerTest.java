@@ -190,7 +190,7 @@ class ManagerTest {
         }
         IllegalStateException e = assertThrows(IllegalStateException.class,
                 () -> mgr.sendMessage("busy", "续派"));
-        assertTrue(e.getMessage().contains("尚未完成"));
+        assertTrue(e.getMessage().contains("仍在运行中"));
         assertTrue(mgr.stop(id));
         assertThrows(IllegalStateException.class, () -> mgr.sendMessage("不存在", "x"));
     }

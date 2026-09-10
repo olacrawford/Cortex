@@ -10,8 +10,12 @@ import java.util.List;
  */
 public final class Filter {
 
-    /** 任何子 Agent 永远不能用的工具（F26，本期最小集合，后续可扩展）。 */
-    public static final List<String> ALL_AGENT_DISALLOWED_TOOLS = List.of("Agent");
+    /** 任何子 Agent 永远不能用的工具（F26；阶段14 加入 Team 专属协作工具）。 */
+    public static final List<String> ALL_AGENT_DISALLOWED_TOOLS =
+            List.of("Agent", "TaskCreate", "TaskUpdate");
+
+    /** Team 队员专属协作工具（F26/G6）：teammate=true 时从禁止集中豁免。 */
+    public static final List<String> TEAMMATE_TOOLS = List.of("TaskCreate", "TaskUpdate");
 
     /**
      * 自定义（user/project/plugin 来源）Agent 额外禁用的工具（F27）。
@@ -41,6 +45,7 @@ public final class Filter {
      * @param fork        是否 Fork 路径（保留完整父工具集含 Agent 工具，靠双闸拦截，AC5/N2）
      * @param allowed     Agent 定义 tools 白名单（空 = 不收窄）
      * @param disallowed  Agent 定义 disallowedTools 黑名单
+     * @param teammate    是否 Team 队员（true 时 TaskCreate/TaskUpdate 从禁止集豁免，G6/AC9）
      */
     public record FilterParams(
             List<String> all,
@@ -48,14 +53,27 @@ public final class Filter {
             boolean background,
             boolean fork,
             List<String> allowed,
-            List<String> disallowed) {}
+            List<String> disallowed,
+            boolean teammate) {
+
+        /** 兼容旧签名（非 Team 场景）。 */
+        public FilterParams(List<String> all, int source, boolean background, boolean fork,
+                            List<String> allowed, List<String> disallowed) {
+            this(all, source, background, fork, allowed, disallowed, false);
+        }
+    }
 
     /** 按 F30 顺序应用五层过滤，返回最终 allowed 列表。 */
     public static List<String> applyAgentToolFilter(FilterParams p) {
         List<String> cur = new ArrayList<>(p.all());
-        // ① 全局禁止列表（Fork 路径豁免：工具集保持与父一致，N2）
+        // ① 全局禁止列表（Fork 路径豁免：工具集保持与父一致，N2；Team 队员豁免协作工具，G6）
         if (!p.fork()) {
-            cur.removeAll(ALL_AGENT_DISALLOWED_TOOLS);
+            if (p.teammate()) {
+                cur.removeAll(ALL_AGENT_DISALLOWED_TOOLS.stream()
+                        .filter(t -> !TEAMMATE_TOOLS.contains(t)).toList());
+            } else {
+                cur.removeAll(ALL_AGENT_DISALLOWED_TOOLS);
+            }
         }
         // ② 自定义 Agent 额外限制（本期为空）
         if (p.source() >= 2) {

@@ -218,7 +218,7 @@ class SlashDispatchTest {
         // 12 条候选超过 MAX_ROWS=8：首屏可见前 8 条 + 滚动提示（N5），第 9 条起的 /resume 不可见
         assertTrue(viewAll.contains("/clear"));
         assertTrue(viewAll.contains("/hooks"));
-        assertTrue(viewAll.contains("↓ 9 more"));
+        assertTrue(viewAll.contains("↓ 10 more"));
         assertFalse(viewAll.contains("/session"), "超出首屏的候选应被滚动窗口隐藏");
 
         type("s");

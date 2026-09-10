@@ -150,4 +150,35 @@ class ConfigLoaderTest {
         assertEquals(100000, cfg.getProviders().get(0).getContextWindow());
         assertEquals(100000, cfg.getProviders().get(0).effectiveContextWindow());
     }
+
+    @Test
+    void features段解析_缺省全false() throws Exception {
+        Path f = writeConfig("""
+                providers:
+                  - name: p1
+                    protocol: openai-compat
+                    api_key: k
+                    model: m
+                    base_url: http://localhost
+                features:
+                  coordinator_mode: true
+                  fork_teammate: false
+                """);
+        AppConfig cfg = ConfigLoader.load(f.toString());
+        assertTrue(cfg.getFeatures().coordinatorMode(), "coordinator_mode 应解析为 true");
+        assertFalse(cfg.getFeatures().forkTeammate());
+
+        Path f2 = writeConfig("""
+                providers:
+                  - name: p1
+                    protocol: openai-compat
+                    api_key: k
+                    model: m
+                    base_url: http://localhost
+                """);
+        AppConfig cfg2 = ConfigLoader.load(f2.toString());
+        assertFalse(cfg2.getFeatures().coordinatorMode());
+        assertFalse(cfg2.getFeatures().forkTeammate());
+    }
+
 }

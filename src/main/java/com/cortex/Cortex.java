@@ -77,13 +77,11 @@ public class Cortex {
             // ch11：Hook 引擎（hooks.yaml 双层加载，加载错误只 stderr 不阻断启动）
             com.cortex.hook.HookEngine hookEngine = com.cortex.hook.HookLoader.load(root);
 
-            // ch12：SubAgent 角色编目 + 后台任务管理器 + 5 个新工具（Agent/TaskList/TaskGet/TaskStop/SendMessage）
+            // ch12：SubAgent 角色编目 + 后台任务管理器 + 统一命名注册表（阶段14 F37）
             com.cortex.subagent.Catalog subAgentCatalog = com.cortex.subagent.Catalog.load(root);
             com.cortex.task.Manager taskMgr = new com.cortex.task.Manager();
-            registry.register(new com.cortex.task.TaskListTool(taskMgr));
-            registry.register(new com.cortex.task.TaskGetTool(taskMgr));
-            registry.register(new com.cortex.task.TaskStopTool(taskMgr));
-            registry.register(new com.cortex.task.SendMessageTool(taskMgr));
+            com.cortex.team.AgentNameRegistry nameReg = new com.cortex.team.AgentNameRegistry();
+            taskMgr.setNameRegistry(nameReg);
 
             // ch13：Worktree 管理器（非 git 仓库降级为「未启用」，F5/F35）+ 后台过期清理（F34）
             com.cortex.worktree.WorktreeManager worktreeMgr;
@@ -96,9 +94,36 @@ public class Cortex {
                 System.err.println("[worktree] warn: 管理器未启用（" + werr.getMessage() + "）");
                 worktreeMgr = null;
             }
+
+            // ch14：Team 管理器 + 协作工具注册（TeamCreate/TeamDelete 总可见；TaskCreate/TaskUpdate 仅队员可见）
+            com.cortex.team.TeamManager teamMgr = null;
+            if (worktreeMgr != null) {
+                try {
+                    teamMgr = new com.cortex.team.TeamManager(
+                            Path.of(System.getProperty("user.home")), root, worktreeMgr, taskMgr,
+                            nameReg, subAgentCatalog, "build/libs/cortex.jar");
+                } catch (Exception terr) {
+                    System.err.println("[team] warn: 管理器未启用: " + terr.getMessage());
+                }
+            }
+            registry.register(new com.cortex.task.TaskListTool(taskMgr, teamMgr));
+            registry.register(new com.cortex.task.TaskGetTool(taskMgr, teamMgr));
+            registry.register(new com.cortex.task.TaskStopTool(taskMgr));
+            registry.register(new com.cortex.task.SendMessageTool(taskMgr, teamMgr));
+            registry.register(new com.cortex.team.TeamCreateTool(teamMgr));
+            registry.register(new com.cortex.team.TeamDeleteTool(teamMgr));
+            registry.register(new com.cortex.task.TaskCreateTool(teamMgr));
+            registry.register(new com.cortex.task.TaskUpdateTool(teamMgr));
+            boolean coordinatorMode = com.cortex.coordinator.Coordinator.isEnabled(config);
             com.cortex.agent.AgentTool agentTool = new com.cortex.agent.AgentTool(
-                    subAgentCatalog, taskMgr, config.effectiveEnableSubAgentBackground(), worktreeMgr);
+                    subAgentCatalog, taskMgr, config.effectiveEnableSubAgentBackground(),
+                    worktreeMgr, teamMgr);
             registry.register(agentTool);
+            // 阶段14：队员空闲通知挂钩（T30/F45）
+            if (teamMgr != null) {
+                com.cortex.team.TeamManager fmgr = teamMgr;
+                taskMgr.onTaskDone(fmgr::handleTaskDone);
+            }
 
             PermissionEngine engine = PermissionEngine.create(root);
             // ch08：会话级上下文管理状态（决策账本 / 文件追踪 / 熔断计数 / 会话目录），跨 run 持有
@@ -114,7 +139,8 @@ public class Cortex {
 
             CortexModel model = new CortexModel(config.getProviders(), registry, engine, runtime,
                     writer, memMgr, instructionText, memoryText, root.resolve(".cortex/sessions"),
-                    skillCatalog, hookEngine, taskMgr, agentTool, worktreeMgr);
+                    skillCatalog, hookEngine, taskMgr, agentTool, worktreeMgr,
+                    teamMgr, "build/libs/cortex.jar", coordinatorMode);
             // ch10：远程安装工具 → 装完 reload catalog 并重新注册斜杠命令，无需重启
             registry.register(new InstallSkillTool(skillCatalog, root,
                     Path.of(System.getProperty("user.home"), ".cortex", "skills"),
