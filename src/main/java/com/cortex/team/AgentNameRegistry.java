@@ -59,14 +59,18 @@ public final class AgentNameRegistry {
         }
     }
 
-    /** 解析：name 优先，agentId 反查兜底（F36）。 */
+    /** 解析（F36）：name 优先查 agentId；否则若输入本身是已知 agentId 则原样返回。 */
     public Optional<String> resolve(String nameOrId) {
         if (nameOrId == null || nameOrId.isBlank()) {
             return Optional.empty();
         }
         lock.lock();
         try {
-            return Optional.ofNullable(byName.get(nameOrId)).or(() -> Optional.ofNullable(byId.get(nameOrId)));
+            String id = byName.get(nameOrId);
+            if (id != null) {
+                return Optional.of(id);
+            }
+            return byId.containsKey(nameOrId) ? Optional.of(nameOrId) : Optional.empty();
         } finally {
             lock.unlock();
         }

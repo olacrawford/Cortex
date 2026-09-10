@@ -12,6 +12,7 @@ class FilterTest {
     private static final List<String> ALL = List.of(
             "read_file", "write_file", "edit_file", "bash", "glob", "grep",
             "install_skill", "Agent", "TaskList", "TaskGet", "TaskStop", "SendMessage",
+            "TaskCreate", "TaskUpdate",
             "mcp__fs__read", "mcp__git__status");
 
     private static Filter.FilterParams params(boolean background, boolean fork,
@@ -23,11 +24,13 @@ class FilterTest {
     void 默认只去除Agent元工具() {
         List<String> out = Filter.applyAgentToolFilter(params(false, false, List.of(), List.of()));
         assertFalse(out.contains("Agent"), "定义式子 Agent 看不到 Agent 工具（F3/AC6）");
+        assertFalse(out.contains("TaskCreate"), "Team 专属工具对非队员不可见（AC9）");
+        assertFalse(out.contains("TaskUpdate"));
         assertTrue(out.contains("read_file"));
-        assertTrue(out.contains("TaskList"), "前台子 Agent 其余工具保留（本期全局禁止列表仅 Agent）");
-        assertEquals(ALL.size() - 1, out.size());
+        assertTrue(out.contains("TaskList"), "前台子 Agent 其余工具保留");
+        assertEquals(ALL.size() - 3, out.size());
         // 保持注册顺序
-        assertEquals(ALL.stream().filter(n -> !"Agent".equals(n)).toList(), out);
+        assertEquals(ALL.stream().filter(n -> !Filter.ALL_AGENT_DISALLOWED_TOOLS.contains(n)).toList(), out);
     }
 
     @Test
@@ -89,6 +92,22 @@ class FilterTest {
                 List.of("read_file", "Agent", "bash"), List.of()));
         // Agent 不在后台白名单，交集后剔除
         assertEquals(List.of("read_file", "bash"), out);
+    }
+
+    @Test
+    void teammate豁免Team协作工具() {
+        // 主 Agent / 普通子 Agent：TaskCreate/TaskUpdate 不可见（AC9）
+        var mainParams = new Filter.FilterParams(ALL, 1, false, false, List.of(), List.of(), false);
+        List<String> mainOut = Filter.applyAgentToolFilter(mainParams);
+        assertFalse(mainOut.contains("TaskCreate"));
+        assertFalse(mainOut.contains("TaskUpdate"));
+        // 队员：协作工具可见（G6）
+        var mateParams = new Filter.FilterParams(ALL, 1, false, false, List.of(), List.of(), true);
+        List<String> mateOut = Filter.applyAgentToolFilter(mateParams);
+        assertTrue(mateOut.contains("TaskCreate"));
+        assertTrue(mateOut.contains("TaskUpdate"));
+        // 队员依然不能看到 Agent 工具
+        assertFalse(mateOut.contains("Agent"));
     }
 
     @Test
