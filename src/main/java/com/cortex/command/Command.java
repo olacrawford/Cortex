@@ -18,9 +18,14 @@ public record Command(
         aliases = List.copyOf(aliases);
     }
 
-    /** 命令处理函数：只依赖 {@link Ui} 抽象，不持有具体 TUI 类型（F33/F35）。 */
+    /**
+     * 命令处理函数：只依赖 {@link Ui} 抽象，不持有具体 TUI 类型（F33/F35）。
+     *
+     * @param args 命令名之后的尾随参数串（"/worktree create x" 传 "create x"；无参传空串）。
+     *             仅描述以 "[args]" 结尾（或 [skill]）的命令会由 dispatcher 以带参形式命中。
+     */
     @FunctionalInterface
     public interface Handler {
-        void handle(Ui ui) throws Exception;
+        void handle(Ui ui, String args) throws Exception;
     }
 }

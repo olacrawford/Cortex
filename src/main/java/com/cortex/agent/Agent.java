@@ -25,6 +25,7 @@ import com.cortex.prompt.Environment;
 import com.cortex.prompt.Prompt;
 import com.cortex.prompt.Reminder;
 import com.cortex.tool.Result;
+import com.cortex.tool.ToolContext;
 import com.cortex.tool.ToolRegistry;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -254,16 +255,29 @@ public final class Agent {
         return activeConv;
     }
 
+    // ─── 阶段13：explicit cwd（ToolContext）───
+
+    private volatile ToolContext toolContext = ToolContext.EMPTY;
+
+    /** 设置本 Agent 工具调用的 explicit cwd（isolation:worktree 子 Agent 与 /worktree enter 用，F18）。 */
+    public void setToolContext(ToolContext ctx) {
+        this.toolContext = ctx == null ? ToolContext.EMPTY : ctx;
+    }
+
+    ToolContext toolContext() {
+        return toolContext;
+    }
+
     /** 工具执行现场的调用方 Agent；非 Agent 循环线程返回 null。 */
     static Agent currentCaller() {
         return CURRENT_CALLER.get();
     }
 
-    /** 以本 Agent 为调用方执行工具（QuerySource 闸的数据来源）；包装 registry.execute。 */
+    /** 以本 Agent 为调用方执行工具（QuerySource 闸 + explicit cwd 的数据来源）；包装 registry.execute。 */
     private Result executeAsCaller(com.cortex.llm.ToolCall call) {
         CURRENT_CALLER.set(this);
         try {
-            return registry.execute(call.name(), call.args());
+            return registry.execute(call.name(), toolContext, call.args());
         } finally {
             CURRENT_CALLER.remove();
         }

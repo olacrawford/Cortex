@@ -31,6 +31,17 @@ public interface Tool {
     /**
      * 执行工具。
      *
+     * @param ctx     执行上下文（explicit cwd 等；模型不可见，F16/F19）
+     * @param argsJson 模型给出的 JSON 参数（注册中心已把 null/空串归一为 "{}"）
+     */
+    default Result execute(ToolContext ctx, String argsJson) {
+        return execute(argsJson); // 未适配 ctx 的工具沿用无 ctx 路径
+    }
+
+    /**
+     * 执行工具（无 explicit cwd 语义的原始入口）；已适配 ctx 的工具经由
+     * {@link #execute(ToolContext, String)} 优先分发。
+     *
      * @param argsJson 模型给出的 JSON 参数（注册中心已把 null/空串归一为 "{}"）
      */
     Result execute(String argsJson);

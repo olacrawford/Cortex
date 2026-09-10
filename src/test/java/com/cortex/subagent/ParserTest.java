@@ -153,6 +153,22 @@ class ParserTest {
     }
 
     @Test
+    void isolation字段解析与降级() {
+        // 合法 worktree
+        String md = "---\nname: iso\ndescription: x\nisolation: worktree\n---\nbody";
+        Definition d = Parser.parseDefinition(md.getBytes(), "mem://iso", Source.USER);
+        assertEquals(Definition.ISOLATION_WORKTREE, d.isolation());
+        // 缺省为空串
+        Definition none = Parser.parseDefinition(
+                "---\nname: noiso\ndescription: x\n---\nbody".getBytes(), "m", Source.BUILTIN);
+        assertEquals("", none.isolation());
+        // 非法值 stderr 警告并回落空串
+        Definition bad = Parser.parseDefinition(
+                "---\nname: badiso\ndescription: x\nisolation: gibberish\n---\nbody".getBytes(), "m", Source.BUILTIN);
+        assertEquals("", bad.isolation());
+    }
+
+    @Test
     void parseFile读取真实文件() throws Exception {
         Path f = tmp.resolve("wc.md");
         Files.writeString(f, FULL);

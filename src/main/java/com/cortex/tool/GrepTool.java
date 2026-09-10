@@ -69,6 +69,11 @@ public final class GrepTool implements Tool {
 
     @Override
     public Result execute(String argsJson) {
+        return execute(ToolContext.EMPTY, argsJson);
+    }
+
+    @Override
+    public Result execute(ToolContext ctx, String argsJson) {
         GrepArgs args;
         try {
             args = MAPPER.readValue(argsJson, GrepArgs.class);
@@ -84,7 +89,7 @@ public final class GrepTool implements Tool {
         } catch (PatternSyntaxException e) {
             return Result.error("正则非法: " + e.getMessage());
         }
-        Path root = Path.of(args.path() == null || args.path().isBlank() ? "." : args.path());
+        Path root = ctx.resolvePath(args.path() == null || args.path().isBlank() ? "." : args.path()); // 阶段13：explicit cwd 优先（F17）
         if (!Files.isDirectory(root)) {
             return Result.error("路径不存在或不是目录: " + root);
         }

@@ -13,6 +13,7 @@ class BuiltinsTest {
 
     /** 可观测桩：委托 NopUi 并记录调用。 */
     private static class RecordingUi implements Ui {
+        @Override public com.cortex.command.WorktreeAccessor worktreeAccessor() { return null; }
         final List<String> prints = new ArrayList<>();
         final List<String> errors = new ArrayList<>();
         Mode mode = Mode.PLAN;
@@ -133,16 +134,16 @@ class BuiltinsTest {
         return reg;
     }
 
-    private static final List<String> ALL_14 = List.of(
+    private static final List<String> ALL_15 = List.of(
             "clear", "compact", "do", "exit", "help", "hooks", "memory",
-            "permission", "plan", "resume", "review", "session", "skills", "status");
+            "permission", "plan", "resume", "review", "session", "skills", "status", "worktree");
 
     @Test
-    void registerAll_allRegistered_恰好14条全小写() {
+    void registerAll_allRegistered_恰好15条全小写() {
         CommandRegistry reg = newRegistry();
-        assertEquals(14, reg.visible().size());
+        assertEquals(15, reg.visible().size());
         List<String> names = reg.visible().stream().map(Command::name).toList();
-        assertEquals(ALL_14, names);
+        assertEquals(ALL_15, names);
         for (String n : names) {
             assertEquals(n, n.toLowerCase(), "命令名必须全小写");
         }
@@ -153,7 +154,7 @@ class BuiltinsTest {
         CommandRegistry reg = newRegistry();
         // 已注册注册中心再注册任意同名命令 → 启动期立即失败（F2/N4）
         IllegalStateException ex = assertThrows(IllegalStateException.class,
-                () -> reg.register(new Command("help", List.of(), "重复", Kind.LOCAL, false, ui -> {})));
+                () -> reg.register(new Command("help", List.of(), "重复", Kind.LOCAL, false, (ui, args) -> {})));
         assertTrue(ex.getMessage().contains("help"));
     }
 
@@ -161,7 +162,7 @@ class BuiltinsTest {
     void registerAll_handlersRunOnNopUi_全部不抛异常() throws Exception {
         CommandRegistry reg = newRegistry();
         for (Command c : reg.visible()) {
-            assertDoesNotThrow(() -> c.handler().handle(Ui.NopUi.INSTANCE),
+            assertDoesNotThrow(() -> c.handler().handle(Ui.NopUi.INSTANCE, ""),
                     "handler 在 NopUi 上应可安全执行: " + c.name());
         }
     }
@@ -170,12 +171,12 @@ class BuiltinsTest {
     void handleHooks_空时NoHooksLoaded_有规则列出() throws Exception {
         CommandRegistry reg = newRegistry();
         RecordingUi empty = new RecordingUi();
-        reg.lookup("hooks").orElseThrow().handler().handle(empty);
+        reg.lookup("hooks").orElseThrow().handler().handle(empty, "");
         assertEquals("No hooks loaded.", empty.prints.get(0));
 
         RecordingUi ui = new RecordingUi();
         ui.hookLineList = List.of("PreToolUse:", "  block-write  shell [once]");
-        reg.lookup("hooks").orElseThrow().handler().handle(ui);
+        reg.lookup("hooks").orElseThrow().handler().handle(ui, "");
         String out = ui.prints.get(ui.prints.size() - 1);
         assertTrue(out.contains("PreToolUse:"));
         assertTrue(out.contains("block-write  shell [once]"));
@@ -186,7 +187,7 @@ class BuiltinsTest {
     void handleSkills_空清单给引导_有清单逐行列出() throws Exception {
         CommandRegistry reg = newRegistry();
         RecordingUi empty = new RecordingUi();
-        reg.lookup("skills").orElseThrow().handler().handle(empty);
+        reg.lookup("skills").orElseThrow().handler().handle(empty, "");
         assertTrue(empty.prints.get(0).contains("无已安装技能"));
 
         RecordingUi ui = new RecordingUi() {
@@ -195,7 +196,7 @@ class BuiltinsTest {
                 return List.of("demo", "commit-helper");
             }
         };
-        reg.lookup("skills").orElseThrow().handler().handle(ui);
+        reg.lookup("skills").orElseThrow().handler().handle(ui, "");
         String out = ui.prints.get(ui.prints.size() - 1);
         assertTrue(out.contains("demo"));
         assertTrue(out.contains("commit-helper"));
@@ -205,7 +206,7 @@ class BuiltinsTest {
     void handleStatus_printsAllKeys_固定顺序六行() throws Exception {
         CommandRegistry reg = newRegistry();
         RecordingUi ui = new RecordingUi();
-        reg.lookup("status").orElseThrow().handler().handle(ui);
+        reg.lookup("status").orElseThrow().handler().handle(ui, "");
         assertEquals(1, ui.prints.size());
         String[] lines = ui.prints.get(0).split("\n");
         assertEquals(6, lines.length);
@@ -223,9 +224,9 @@ class BuiltinsTest {
     void handleHelp_printsAllFourteen_两列对齐() throws Exception {
         CommandRegistry reg = newRegistry();
         RecordingUi ui = new RecordingUi();
-        reg.lookup("help").orElseThrow().handler().handle(ui);
+        reg.lookup("help").orElseThrow().handler().handle(ui, "");
         assertEquals(1, ui.prints.size());
-        for (String n : ALL_14) {
+        for (String n : ALL_15) {
             assertTrue(ui.prints.get(0).contains("/" + n), "缺命令: " + n);
         }
     }
@@ -234,7 +235,7 @@ class BuiltinsTest {
     void handleDo_setsModeAndInjects() throws Exception {
         CommandRegistry reg = newRegistry();
         RecordingUi ui = new RecordingUi();
-        reg.lookup("do").orElseThrow().handler().handle(ui);
+        reg.lookup("do").orElseThrow().handler().handle(ui, "");
         assertEquals(Mode.DEFAULT, ui.mode);
         assertEquals(1, ui.injected.size());
         String[] parts = ui.injected.get(0).split("\u0000");
@@ -245,7 +246,7 @@ class BuiltinsTest {
     void handleReview_injects审查请求() throws Exception {
         CommandRegistry reg = newRegistry();
         RecordingUi ui = new RecordingUi();
-        reg.lookup("review").orElseThrow().handler().handle(ui);
+        reg.lookup("review").orElseThrow().handler().handle(ui, "");
         assertEquals(1, ui.injected.size());
         assertTrue(ui.injected.get(0).contains("审查"));
     }
@@ -254,15 +255,15 @@ class BuiltinsTest {
     void handleUiCommands_委托正确动作() throws Exception {
         CommandRegistry reg = newRegistry();
         RecordingUi ui = new RecordingUi();
-        reg.lookup("exit").orElseThrow().handler().handle(ui);
+        reg.lookup("exit").orElseThrow().handler().handle(ui, "");
         assertTrue(ui.quit);
-        reg.lookup("plan").orElseThrow().handler().handle(ui);
+        reg.lookup("plan").orElseThrow().handler().handle(ui, "");
         assertEquals(Mode.PLAN, ui.mode);
-        reg.lookup("compact").orElseThrow().handler().handle(ui);
+        reg.lookup("compact").orElseThrow().handler().handle(ui, "");
         assertTrue(ui.prints.contains("COMPACT"));
-        reg.lookup("resume").orElseThrow().handler().handle(ui);
+        reg.lookup("resume").orElseThrow().handler().handle(ui, "");
         assertTrue(ui.prints.contains("RESUME"));
-        reg.lookup("clear").orElseThrow().handler().handle(ui);
+        reg.lookup("clear").orElseThrow().handler().handle(ui, "");
         assertTrue(ui.cleared);
     }
 
@@ -270,13 +271,13 @@ class BuiltinsTest {
     void handleMemoryAndSession_输出文件名与会话信息() throws Exception {
         CommandRegistry reg = newRegistry();
         RecordingUi ui = new RecordingUi();
-        reg.lookup("memory").orElseThrow().handler().handle(ui);
+        reg.lookup("memory").orElseThrow().handler().handle(ui, "");
         assertTrue(ui.prints.get(ui.prints.size() - 1).contains("MEMORY.md"));
-        reg.lookup("session").orElseThrow().handler().handle(ui);
+        reg.lookup("session").orElseThrow().handler().handle(ui, "");
         String out = ui.prints.get(ui.prints.size() - 1);
         assertTrue(out.contains("Session: 20260909-120000-abcd"));
         assertTrue(out.contains("Path: /tmp/ws/.cortex/sessions/x/conversation.jsonl"));
-        reg.lookup("permission").orElseThrow().handler().handle(ui);
+        reg.lookup("permission").orElseThrow().handler().handle(ui, "");
         assertEquals("plan", ui.prints.get(ui.prints.size() - 1));
     }
 }

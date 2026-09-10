@@ -134,10 +134,22 @@ public final class Parser {
 
         boolean background = Boolean.TRUE.equals(front.get("background"));
 
+        String isolation = str(front.get("isolation"));
+        if (isolation != null && !isolation.isBlank()) {
+            isolation = isolation.strip();
+            if (!isolation.equals(Definition.ISOLATION_WORKTREE)) {
+                System.err.printf("subagent \"%s\": unknown isolation \"%s\", fallback to none (%s)%n",
+                        name, isolation, filePath);
+                isolation = "";
+            }
+        } else {
+            isolation = "";
+        }
+
         return new Definition(name, description.strip(),
                 strList(front.get("tools")), strList(front.get("disallowedTools")),
                 model, maxTurns, mode, dontAsk, background,
-                body, filePath, source);
+                isolation, body, filePath, source);
     }
 
     private static String str(Object v) {

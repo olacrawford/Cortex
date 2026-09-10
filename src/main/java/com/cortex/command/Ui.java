@@ -58,6 +58,9 @@ public interface Ui {
     /** hook 加载来源文件清单。 */
     List<String> hookSources();
 
+    /** Worktree 管理能力（阶段13 /worktree 用）；未启用（非 git 仓库等）返回 null。 */
+    WorktreeAccessor worktreeAccessor();
+
     // ─── 影响界面动作 ───
     void quit();
 
@@ -147,6 +150,11 @@ public interface Ui {
         @Override
         public List<String> hookSources() {
             return List.of();
+        }
+
+        @Override
+        public WorktreeAccessor worktreeAccessor() {
+            return null;
         }
 
         @Override

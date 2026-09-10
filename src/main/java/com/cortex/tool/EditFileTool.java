@@ -64,6 +64,11 @@ public final class EditFileTool implements Tool {
 
     @Override
     public Result execute(String argsJson) {
+        return execute(ToolContext.EMPTY, argsJson);
+    }
+
+    @Override
+    public Result execute(ToolContext ctx, String argsJson) {
         EditFileArgs args;
         try {
             args = MAPPER.readValue(argsJson, EditFileArgs.class);
@@ -81,7 +86,7 @@ public final class EditFileTool implements Tool {
         }
         String content;
         try {
-            content = Files.readString(Path.of(args.path()));
+            content = Files.readString(ctx.resolvePath(args.path())); // 阶段13：explicit cwd 优先（F17）
         } catch (IOException e) {
             return Result.error("读取失败: " + e.getMessage());
         }
@@ -93,7 +98,7 @@ public final class EditFileTool implements Tool {
             return Result.error("匹配到 %d 处，old_string 不唯一，请提供更长上下文使其唯一".formatted(n));
         }
         try {
-            Files.writeString(Path.of(args.path()), content.replace(args.oldString(), args.newString()));
+            Files.writeString(ctx.resolvePath(args.path()), content.replace(args.oldString(), args.newString()));
         } catch (IOException e) {
             return Result.error("写入失败: " + e.getMessage());
         }

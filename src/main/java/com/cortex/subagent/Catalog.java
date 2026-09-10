@@ -70,7 +70,7 @@ public final class Catalog implements com.cortex.agent.AgentCatalogPort {
         return new Definition(Definition.FORK_NAME, "Fork-based subagent",
                 List.of(), List.of(),
                 "inherit", 0, com.cortex.permission.Mode.DEFAULT, false, false,
-                "", "fork://inline", Source.BUILTIN);
+                "", "", "fork://inline", Source.BUILTIN);
     }
 
     // ─── 内部 ───

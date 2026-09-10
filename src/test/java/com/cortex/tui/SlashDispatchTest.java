@@ -218,7 +218,7 @@ class SlashDispatchTest {
         // 12 条候选超过 MAX_ROWS=8：首屏可见前 8 条 + 滚动提示（N5），第 9 条起的 /resume 不可见
         assertTrue(viewAll.contains("/clear"));
         assertTrue(viewAll.contains("/hooks"));
-        assertTrue(viewAll.contains("↓ 8 more"));
+        assertTrue(viewAll.contains("↓ 9 more"));
         assertFalse(viewAll.contains("/session"), "超出首屏的候选应被滚动窗口隐藏");
 
         type("s");
@@ -271,7 +271,7 @@ class SlashDispatchTest {
     void handler抛异常时兜底为错误提示() {
         app.registerForTest(new com.cortex.command.Command("boom", List.of(), "会抛异常的命令",
                 com.cortex.command.Kind.LOCAL, false,
-                ui -> {
+                (ui, args) -> {
                     throw new IllegalStateException("炸了");
                 }));
         type("/boom");

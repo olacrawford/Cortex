@@ -14,7 +14,7 @@ public final class BuiltinPrompt {
 
     /** /do：先切回默认模式，再注入执行指令并触发回合（F14），外部行为与实施前一致。 */
     public static Command.Handler doRun() {
-        return ui -> {
+        return (ui, args) -> {
             ui.setMode(Mode.DEFAULT);
             ui.injectAndSend(Reminder.EXECUTE_DIRECTIVE, Reminder.EXECUTE_DIRECTIVE);
         };
@@ -22,6 +22,6 @@ public final class BuiltinPrompt {
 
     /** /review：注入固定审查请求并触发回合（F23）。 */
     public static Command.Handler review() {
-        return ui -> ui.injectAndSend("/review", REVIEW_DIRECTIVE);
+        return (ui, args) -> ui.injectAndSend("/review", REVIEW_DIRECTIVE);
     }
 }
