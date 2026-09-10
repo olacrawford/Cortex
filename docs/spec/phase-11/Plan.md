@@ -6,7 +6,7 @@
 
 1. **权限匹配器升级层（permission 包内改造）**——把 Pattern 形态从字符串升级到结构化 Matcher 接口；新增 exact/regex/not 三种实现，glob 保留作为缺省类型。改造对外仅暴露语法升级和 stderr 错误回退,运行时 Allow/Deny 语义不变。
 
-2. **Hook 主体层（新建 `com.mewcode.hook` 包）**——加载 YAML 规则、提供事件分派引擎、四类动作执行器；通过 11 个事件 emit 点接入 agent / tui。
+2. **Hook 主体层（新建 `com.cortex.hook` 包）**——加载 YAML 规则、提供事件分派引擎、四类动作执行器；通过 11 个事件 emit 点接入 agent / tui。
 
 模块构成：
 
@@ -24,7 +24,7 @@
 
 ```java
 // Matcher 是规则匹配的统一接口；四种实现都是 record，sealed permits 限制扩展。
-package com.mewcode.permission;
+package com.cortex.permission;
 
 public sealed interface Matcher permits ExactMatcher, GlobMatcher, RegexMatcher, NotMatcher {
     boolean match(String s);
@@ -82,7 +82,7 @@ public record PermissionRule(
 ### hook.HookRule
 
 ```java
-package com.mewcode.hook;
+package com.cortex.hook;
 
 import java.time.Duration;
 
@@ -119,7 +119,7 @@ public enum CombineMode { ALL_OF, ANY_OF } // 二选一不混用
 
 public record AtomCondition(
         String field,             // 形如 "tool_input.path"
-        com.mewcode.permission.Matcher matcher // 复用四种匹配类型
+        com.cortex.permission.Matcher matcher // 复用四种匹配类型
 ) {}
 ```
 
@@ -223,7 +223,7 @@ public record ExecutionResult(
 **职责：** 提供四种匹配类型的统一接口；`Matchers.compile` 解析前缀。
 **对外接口：** `Matcher` sealed interface、`Matchers.compile(String pattern, boolean command)`。
 **依赖：** Java 标准库 `java.util.regex`。
-**改动文件：** `src/main/java/com/mewcode/permission/PermissionRule.java`(扩展 parse / match)、新增 `src/main/java/com/mewcode/permission/Matcher.java` 及四个 record 实现、新增 `Matchers.java` 工厂。
+**改动文件：** `src/main/java/com/cortex/permission/PermissionRule.java`(扩展 parse / match)、新增 `src/main/java/com/cortex/permission/Matcher.java` 及四个 record 实现、新增 `Matchers.java` 工厂。
 
 ### 模块 B：permission 错误日志
 
@@ -261,35 +261,35 @@ public record ExecutionResult(
 **职责：** 在 `Agent.run` 等关键路径调 `HookEngine.dispatch`；处理 PreToolUse 拦截、注入 reminder。
 **对外接口：** `Agent.Builder.hookEngine(HookEngine)`；agent 私有方法 `dispatchHook(Event event, Payload payload) DispatchResult`。
 **依赖：** 模块 D。
-**改动文件：** `src/main/java/com/mewcode/agent/Agent.java`、`src/main/java/com/mewcode/agent/SessionRuntime.java`(加 `List<String> pendingReminders`、resetForNewSession 清空)。
+**改动文件：** `src/main/java/com/cortex/agent/Agent.java`、`src/main/java/com/cortex/agent/SessionRuntime.java`(加 `List<String> pendingReminders`、resetForNewSession 清空)。
 
 ### 模块 H：tui 接入
 
-**职责：** SessionStart / SessionEnd / SessionResume / UserPromptSubmit / Notification 五个事件在 TUI 侧 emit；UserPromptSubmit 拦截集成到 `MewCodeModel.submit()` 流程。
-**对外接口：** `MewCodeModel` 上私有方法 `dispatchSessionStart` / `dispatchSessionEnd` 等。
+**职责：** SessionStart / SessionEnd / SessionResume / UserPromptSubmit / Notification 五个事件在 TUI 侧 emit；UserPromptSubmit 拦截集成到 `CortexModel.submit()` 流程。
+**对外接口：** `CortexModel` 上私有方法 `dispatchSessionStart` / `dispatchSessionEnd` 等。
 **依赖：** 模块 D。
-**改动文件：** `src/main/java/com/mewcode/tui/MewCodeModel.java`、`src/main/java/com/mewcode/tui/AgentEvent 队列.java`、`src/main/java/com/mewcode/tui/Commands.java`(/clear、/resume 触发 SessionEnd + SessionStart/Resume)。
+**改动文件：** `src/main/java/com/cortex/tui/CortexModel.java`、`src/main/java/com/cortex/tui/AgentEvent 队列.java`、`src/main/java/com/cortex/tui/Commands.java`(/clear、/resume 触发 SessionEnd + SessionStart/Resume)。
 
 ### 模块 I：/hooks 命令
 
 **职责：** 输出已加载 hook 列表 + 加载来源文件。
 **对外接口：** 注册到 `command.BuiltinCommands.register`。
-**依赖：** `MewCodeModel` 暴露 `hookSources()` / `hookRules()` 查询方法（通过 `CommandUi` 接口）。
+**依赖：** `CortexModel` 暴露 `hookSources()` / `hookRules()` 查询方法（通过 `CommandUi` 接口）。
 
 ### 模块 J：Main wiring
 
-**职责：** 在 `MewCode.java` 中调 `HookLoader.load(projectRoot)`，把 HookEngine 注入 agent 与 `MewCodeModel`。
-**改动文件：** `src/main/java/com/mewcode/MewCode.java`、`src/main/java/com/mewcode/tui/MewCodeModel.Params`(Builder 加 hookEngine 字段)。
+**职责：** 在 `Cortex.java` 中调 `HookLoader.load(projectRoot)`，把 HookEngine 注入 agent 与 `CortexModel`。
+**改动文件：** `src/main/java/com/cortex/Cortex.java`、`src/main/java/com/cortex/tui/CortexModel.Params`(Builder 加 hookEngine 字段)。
 
 ## 模块交互
 
 **启动期数据流：**
 
 ```
-MewCode.main()
+Cortex.main()
   ├─ PermissionEngine.create(root)          # 用升级后的 PermissionRule.parse（stderr 报错）
   ├─ HookEngine engine = HookLoader.load(root)  # 扫描两层 YAML、构造 HookEngine
-  └─ new MewCodeModel.Builder()
+  └─ new CortexModel.Builder()
           .hookEngine(engine)
           .agent(Agent.builder()...hookEngine(engine).build())
           .build()
@@ -298,13 +298,13 @@ MewCode.main()
 **SessionStart emit 时机：**
 
 ```
-Main 完成 wiring → new MewCodeModel(params) → app.run() → init() 渲染 banner
+Main 完成 wiring → new CortexModel(params) → app.run() → init() 渲染 banner
                                                        │
                                                        └─ 首条 user 输入到达前
                                                           init() 末尾调 dispatchSessionStart()
 ```
 
-实际接入：`MewCodeModel.init()` 末尾调 `dispatchSessionStart()`，该方法同步调 `HookEngine.dispatch`、收集 `injectedPrompts` 注入到 `runtime.pendingReminders`、然后返回。
+实际接入：`CortexModel.init()` 末尾调 `dispatchSessionStart()`，该方法同步调 `HookEngine.dispatch`、收集 `injectedPrompts` 注入到 `runtime.pendingReminders`、然后返回。
 
 **UserPromptSubmit 路径：**
 
@@ -357,9 +357,9 @@ Agent.run() 第 iter 轮 streamOnce 之前：
 ## 文件组织
 
 ```
-mewcode/
+cortex/
 ├── build.gradle.kts
-├── src/main/java/com/mewcode/
+├── src/main/java/com/cortex/
 │   ├── permission/
 │   │   ├── Matcher.java               # 新增：sealed interface
 │   │   ├── ExactMatcher.java          # 新增：record
@@ -393,12 +393,12 @@ mewcode/
 │   │   ├── BuiltinCommands.java       # 加 /hooks 命令注册
 │   │   └── CommandUi.java             # 接口加 hookSources/hookRules
 │   ├── tui/
-│   │   ├── MewCodeModel.java                # Params 加 hookEngine、持有；init 触发 SessionStart
-│   │   ├── AgentEvent 队列.java            # 不直接动，由 MewCodeModel 触发
+│   │   ├── CortexModel.java                # Params 加 hookEngine、持有；init 触发 SessionStart
+│   │   ├── AgentEvent 队列.java            # 不直接动，由 CortexModel 触发
 │   │   ├── Commands.java              # /clear / /resume 触发 SessionEnd + SessionStart/Resume
 │   │   └── HooksCommand.java          # 新增：/hooks handler、Model 的 hook 查询方法
-│   └── MewCode.java                      # 加 HookLoader.load(root) 与 wiring
-└── src/test/java/dev/mewcode/
+│   └── Cortex.java                      # 加 HookLoader.load(root) 与 wiring
+└── src/test/java/dev/cortex/
     ├── permission/
     │   ├── MatchersTest.java
     │   └── PermissionRuleTest.java
@@ -415,7 +415,7 @@ mewcode/
 | 匹配前缀语法 | `=` 精确、`!` 反向、`~` 正则、无前缀=glob | 单字符前缀让既有 `Bash(git *)` 这种写法继续 work；用户写新形式时直观（=foo 一眼就是精确） |
 | 反向类型嵌套 | `!=value`、`!~regex`、`!glob` 都合法 | 反向是一元运算，对内层 matcher 取反；嵌套写法直接，不需要 `not()` 函数语法 |
 | Matcher 用 sealed interface + record | 而非 enum + switch | record 自动实现 equals/hashCode/toString；sealed 让 switch 模式匹配能穷尽四种类型；新增类型时编译器强制处理 |
-| Hook 包独立 | `com.mewcode.hook` | 与 `com.mewcode.permission` 平级；hook 依赖 permission.Matcher，但 permission 不依赖 hook，无循环 |
+| Hook 包独立 | `com.cortex.hook` | 与 `com.cortex.permission` 平级；hook 依赖 permission.Matcher，但 permission 不依赖 hook，无循环 |
 | Event 用 enum + wireName | 而非 String 常量 | enum 享受类型安全与穷尽 switch；YAML 写的字符串通过 `Event.parse` 转换；JSON 序列化用 `wireName()` 输出 "PreToolUse" 这种 |
 | Payload 内部 Map\<String, Object\> | 而非具体 record | 11 个事件字段差异大；Map + getByPath 灵活；JSON 序列化时按 key 字典序排序便于脚本 grep |
 | Reminder 注入用 SessionRuntime 而非 HookEngine 状态 | `runtime.pendingReminders` | 与现有 plan reminder 同一注入点；下一轮自动清空；不污染 HookEngine |

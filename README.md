@@ -116,4 +116,4 @@ java -jar build/libs/cortex.jar
 ## 相关文档
 
 - `AGENTS.md` — 面向开发者的架构与约定说明
-- `docs/spec/00-meta/mew-spec.md` — 规格驱动开发流程说明
+- `docs/spec/00-meta/cortex-spec.md` — 规格驱动开发流程说明

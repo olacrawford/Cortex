@@ -81,8 +81,8 @@ SKILL.md body 改为「热重载验证：请只回复四个字——重载成功
 
 ## 实现映射说明（相对 checklist 的差异）
 
-- 包/路径映射：`com.mewcode.*` → `com.cortex.*`；技能目录 `.mewcode/skills/` → `.cortex/skills/`（用户层 `~/.cortex/skills/`）。
-- Checklist 中引用的参考实现行号（`MewCodeModel.java:494` 等）不适用于本仓库，接入点对应为：编目加载在 `Cortex.main`（`loadCatalog(root)`，两层一次完成）、命令注册在 `CortexModel.activate → wireSkillsToAgent / registerSkillCommand`、分发分支在 `CortexModel.dispatchSlash`（`description().endsWith("[skill]")`）。
+- 包/路径映射：`com.cortex.*` → `com.cortex.*`；技能目录 `.cortex/skills/` → `.cortex/skills/`（用户层 `~/.cortex/skills/`）。
+- Checklist 中引用的参考实现行号（`CortexModel.java:494` 等）不适用于本仓库，接入点对应为：编目加载在 `Cortex.main`（`loadCatalog(root)`，两层一次完成）、命令注册在 `CortexModel.activate → wireSkillsToAgent / registerSkillCommand`、分发分支在 `CortexModel.dispatchSlash`（`description().endsWith("[skill]")`）。
 - Plan.md 中的 LoadSkillTool（系统工具 + Active Skills 环境块注入）未纳入本期：Checklist（完成定义）未含该项；`buildActiveContext` 已实现并由单测覆盖，激活态记录在 `CortexModel.activeSkillNames`（/clear 时清空），供后续接入。
 - fork 模式为程序化 API（`SkillExecutor.executeFork` + `SkillForkHost`，单测覆盖），斜杠触发 fork 技能时提示走程序化调用，TUI 未接入（与 spec 主流程一致）。
 - 工具名沿用本仓库 snake_case 约定：`install_skill`（checklist 写作 `InstallSkill`）。

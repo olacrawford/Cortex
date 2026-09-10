@@ -16,16 +16,16 @@
 - [x] `GitHelper.resolveHeadShaFromFS` 在真实 worktree 路径下返回 commit SHA(验证:`./gradlew -q test -Dtest=GitHelperTest#resolveHead`)
 - [x] `new WorktreeManager(repoRoot)` 校验 repoRoot 是 git 仓库;非 git 目录抛 `IOException`(验证:`./gradlew -q test -Dtest=WorktreeManagerTest`)
 - [x] `new WorktreeManager` 加载已存在的 session 文件;指向不存在目录的 session 自动清空(验证:同上)
-- [x] `manager.create("alice", "HEAD", true)` 在 `.mewcode/worktrees/alice/` 下落地 + 分支 `worktree-alice`(验证:`./gradlew -q test -Dtest=WorktreeCreateTest`)
-- [x] `manager.create("team/alice", ...)` 落地 `.mewcode/worktrees/team+alice/` + 分支 `worktree-team+alice`(验证:同上)
+- [x] `manager.create("alice", "HEAD", true)` 在 `.cortex/worktrees/alice/` 下落地 + 分支 `worktree-alice`(验证:`./gradlew -q test -Dtest=WorktreeCreateTest`)
+- [x] `manager.create("team/alice", ...)` 落地 `.cortex/worktrees/team+alice/` + 分支 `worktree-team+alice`(验证:同上)
 - [x] `manager.create` 目录已存在时走快速恢复(不调 git;`active` 立即就绪)(验证:同上)
 - [x] `manager.create` 已 active 名字时再 create 抛异常(验证:同上)
-- [x] 创建后设置 A——`.mewcode/settings.local.yaml` 被复制到 Worktree(验证:同上,需在测试 fixture 准备文件)
+- [x] 创建后设置 A——`.cortex/settings.local.yaml` 被复制到 Worktree(验证:同上,需在测试 fixture 准备文件)
 - [x] 创建后设置 B——主仓 `.husky/` 存在时 Worktree git config 含 core.hooksPath(验证:`./gradlew -q test -Dtest=PostCreationSetupTest#hooks`)
 - [x] 创建后设置 C——主仓 node_modules 存在时 Worktree 内为软链(`Files.isSymbolicLink(...)` 为 true)(验证:`./gradlew -q test -Dtest=PostCreationSetupTest#symlink`)
 - [x] 创建后设置 D——主仓 `.worktreeinclude` 模式命中的 ignored 文件被复制到 Worktree(验证:`./gradlew -q test -Dtest=PostCreationSetupTest#includeIgnored`)
 - [x] `manager.enter(name)` 不改变 JVM 当前目录 `Path.of("").toAbsolutePath()`,返回 session 含 `originalCwd`/`worktreePath`/`sessionId` 等字段(验证:`./gradlew -q test -Dtest=WorktreeLifecycleTest#enter`)
-- [x] `manager.enter` 持久化 session 到 `.mewcode/worktree_session.json`(验证:同上)
+- [x] `manager.enter` 持久化 session 到 `.cortex/worktree_session.json`(验证:同上)
 - [x] `manager.exit(name, REMOVE, new ExitOptions(false))` 有变更时抛 `WorktreeHasChangesException`,Worktree 目录仍在(验证:`./gradlew -q test -Dtest=WorktreeLifecycleTest#exit`)
 - [x] `manager.exit(name, REMOVE, new ExitOptions(true))` 成功删除 Worktree + 分支;session 文件被清空(验证:同上)
 - [x] `manager.exit` 返回的 `ExitReport.path()` 等于原 wt.path()(让上层 UI 还原 activeCwd)(验证:同上)
@@ -75,18 +75,18 @@
 
 ### tui 包扩展
 
-- [x] `MewCodeModel` 含 `WorktreeManager worktreeMgr` 与 `Path activeCwd` 字段(本代码库用级联构造器替代 Builder,14 参构造;验证:编译通过)
-- [x] `MewCodeModel.Builder` 接收 `worktreeMgr` 参数;启动时若 `manager.currentSession()` 非 null,设 `activeCwd = Path.of(session.worktreePath())`(验证:`./gradlew -q test -Dtest=MewCodeModelStartupTest`)
+- [x] `CortexModel` 含 `WorktreeManager worktreeMgr` 与 `Path activeCwd` 字段(本代码库用级联构造器替代 Builder,14 参构造;验证:编译通过)
+- [x] `CortexModel.Builder` 接收 `worktreeMgr` 参数;启动时若 `manager.currentSession()` 非 null,设 `activeCwd = Path.of(session.worktreePath())`(验证:`./gradlew -q test -Dtest=CortexModelStartupTest`)
 - [x] 主 Agent run 前 ctx 注入 cwd——可通过日志或 mock Provider 断言 tool 调用收到的 cwd(验证:同上)
 - [x] `TuiWorktreeAccessor` 实现 `WorktreeAccessor` 接口(验证:`./gradlew shadowJar`)
 
 ### main 接入
 
-- [x] `MewCode.java` 构造 `WorktreeManager`,失败 stderr 警告 + 降级(验证:`./gradlew shadowJar`)
+- [x] `Cortex.java` 构造 `WorktreeManager`,失败 stderr 警告 + 降级(验证:`./gradlew shadowJar`)
 - [x] `new AgentTool(...)` 调用末尾追加 `worktreeMgr`(验证:同上)
-- [x] `new MewCodeModel(` 链上有 `.worktreeMgr(...)`(验证:同上)
+- [x] `new CortexModel(` 链上有 `.worktreeMgr(...)`(验证:同上)
 - [x] 启动时通过 `Thread.startVirtualThread` 跑 `sweepStale`(验证:`Grep` 检查代码)
-- [x] `.gitignore` 追加 `.cortex/worktrees/` 与 `.cortex/worktree_session.json`(按本代码库目录约定适配 .mewcode→.cortex;验证:`git check-ignore` 通过)
+- [x] `.gitignore` 追加 `.cortex/worktrees/` 与 `.cortex/worktree_session.json`(按本代码库目录约定适配 .cortex→.cortex;验证:`git check-ignore` 通过)
 
 ## 集成
 
@@ -103,10 +103,10 @@
 
 ## 端到端场景(tmux 实跑)
 
-每个场景在 tmux 内启动一个 mewcode 实例完成,验证可视化行为。
+每个场景在 tmux 内启动一个 cortex 实例完成,验证可视化行为。
 
 **通用预置:**
-- 当前目录 `cd /Users/codemelo/mewcode`
+- 当前目录 `cd /Users/codemelo/cortex`
 - 已执行 `./gradlew shadowJar`
 
 ### 场景 1:isolation:worktree 子 Agent 修改文件不影响主目录
@@ -114,7 +114,7 @@
 **预置:** 创建项目级自定义 Agent:
 
 ```
-.mewcode/agents/worktree-writer.md
+.cortex/agents/worktree-writer.md
 ---
 name: worktree-writer
 description: 在 Worktree 内写文件的测试 Agent
@@ -129,14 +129,14 @@ isolation: worktree
 并准备一个主目录文件 `echo "MAIN" > scratch_ch14.txt`(测试前 git status 干净,这个文件未跟踪)。
 
 **步骤:**
-- [x] tmux 启动:`tmux new-session -d -s ch14 -x 200 -y 50 "java -jar build/libs/mewcode.jar"`
+- [x] tmux 启动:`tmux new-session -d -s ch14 -x 200 -y 50 "java -jar build/libs/cortex.jar"`
 - [x] 输入:「用 Agent 工具调 subagent_type=worktree-writer,prompt 是『把 scratch_ch14.txt 的内容覆盖为 SUBAGENT,只用 write_file 工具』」
 - [x] 子 Agent 跑动,scrollback 出现 `Agent(...)` 行
-- [x] tool_result 中末尾含 `[Worktree 保留: .mewcode/worktrees/agent-a... ,分支 worktree-agent-a...]`(因为有未提交修改,autoCleanup 保留)
+- [x] tool_result 中末尾含 `[Worktree 保留: .cortex/worktrees/agent-a... ,分支 worktree-agent-a...]`(因为有未提交修改,autoCleanup 保留)
 - [x] **主目录** `cat scratch_ch14.txt` 仍为 `MAIN`(验证主目录未被改)
-- [x] **Worktree 副本** `cat .mewcode/worktrees/agent-a*/scratch_ch14.txt` 为 `SUBAGENT`
+- [x] **Worktree 副本** `cat .cortex/worktrees/agent-a*/scratch_ch14.txt` 为 `SUBAGENT`
 - [x] tmux 截屏断言:`tmux capture-pane -p -t ch14 | grep -i "worktree"`
-- [x] 清理:`rm scratch_ch14.txt`,删除残留 worktree:mewcode 内 `/worktree remove agent-a... --discard`(或 `git worktree remove --force` 手动清)
+- [x] 清理:`rm scratch_ch14.txt`,删除残留 worktree:cortex 内 `/worktree remove agent-a... --discard`(或 `git worktree remove --force` 手动清)
 - [x] `tmux kill-session -t ch14`
 
 ### 场景 2:isolation:worktree 子 Agent 无变更时自动清理
@@ -144,11 +144,11 @@ isolation: worktree
 **预置:** 同场景 1 的 `worktree-writer.md`(已存在)。
 
 **步骤:**
-- [x] tmux 启动 mewcode
+- [x] tmux 启动 cortex
 - [x] 输入:「用 Agent 工具调 subagent_type=worktree-writer,prompt 是『用 read_file 读 README.md 头 5 行,然后用 30 字总结』」
 - [x] 子 Agent 跑动,tool_result 是总结文本
 - [x] tool_result **不含**「Worktree 保留」字样(因为读文件不产生修改,autoCleanup 直接清理)
-- [x] `ls .mewcode/worktrees/` 不存在与本次任务对应的 `agent-a*` 目录(已被 autoCleanup 删除)
+- [x] `ls .cortex/worktrees/` 不存在与本次任务对应的 `agent-a*` 目录(已被 autoCleanup 删除)
 - [x] `tmux kill-session`
 
 ### 场景 3:`/worktree create` + `/worktree list` 手动管理
@@ -156,14 +156,14 @@ isolation: worktree
 **预置:** 当前在 main 分支,git 工作区干净。
 
 **步骤:**
-- [x] tmux 启动 mewcode
+- [x] tmux 启动 cortex
 - [x] 输入:`/worktree create demo-feature`
-- [x] scrollback 显示 `Worktree 已创建: .mewcode/worktrees/demo-feature (分支 worktree-demo-feature)`
+- [x] scrollback 显示 `Worktree 已创建: .cortex/worktrees/demo-feature (分支 worktree-demo-feature)`
 - [x] 输入:`/worktree list`
 - [x] scrollback 显示一行含 `demo-feature` 的列表项,标记 `[manual]`(`manual=true`)
-- [x] tmux 外验证:`ls .mewcode/worktrees/demo-feature/` 含正常 mewcode 仓库内容;`git -C .mewcode/worktrees/demo-feature branch` 显示在 `worktree-demo-feature`
+- [x] tmux 外验证:`ls .cortex/worktrees/demo-feature/` 含正常 cortex 仓库内容;`git -C .cortex/worktrees/demo-feature branch` 显示在 `worktree-demo-feature`
 - [x] 清理:输入 `/worktree remove demo-feature --discard`
-- [x] 验证 `.mewcode/worktrees/demo-feature` 已不存在
+- [x] 验证 `.cortex/worktrees/demo-feature` 已不存在
 - [x] `tmux kill-session`
 
 ### 场景 4:`/worktree exit` 变更保护
@@ -171,8 +171,8 @@ isolation: worktree
 **预置:** 同场景 3 创建好 `demo-feature`。
 
 **步骤:**
-- [x] 手动写一个修改:`echo "modified" > .mewcode/worktrees/demo-feature/test.txt`
-- [x] tmux 启动 mewcode
+- [x] 手动写一个修改:`echo "modified" > .cortex/worktrees/demo-feature/test.txt`
+- [x] tmux 启动 cortex
 - [x] 输入:`/worktree enter demo-feature`
 - [x] 输入:`/worktree exit --remove` (不加 `--discard`)
 - [x] scrollback 显示错误 `worktree has uncommitted changes or new commits`(或对应中文消息)
@@ -185,9 +185,9 @@ isolation: worktree
 **预置:** 创建 worktree 并准备测试文件。
 
 **步骤:**
-- [x] tmux 启动 mewcode
+- [x] tmux 启动 cortex
 - [x] 输入:`/worktree create cwd-test`
-- [x] 在 tmux 外:`echo "in-worktree-only" > .mewcode/worktrees/cwd-test/probe.txt`(主目录无 probe.txt)
+- [x] 在 tmux 外:`echo "in-worktree-only" > .cortex/worktrees/cwd-test/probe.txt`(主目录无 probe.txt)
 - [x] tmux 内输入:`/worktree enter cwd-test`
 - [x] 输入:「用 read_file 读 probe.txt」
 - [x] 主 Agent 调 `ReadFile` 工具(path=probe.txt 相对路径)
@@ -201,9 +201,9 @@ isolation: worktree
 ### 场景 6:Slug 校验阻止路径遍历
 
 **步骤:**
-- [x] tmux 启动 mewcode
+- [x] tmux 启动 cortex
 - [x] 输入:`/worktree create ../etc`
-- [x] scrollback 显示错误,含「invalid」或「拒绝」(不创建 `.mewcode/etc/` 或类似)
+- [x] scrollback 显示错误,含「invalid」或「拒绝」(不创建 `.cortex/etc/` 或类似)
 - [x] 输入:`/worktree create ..`
 - [x] 同样错误
 - [x] 输入:`/worktree create normal_one`

@@ -5,8 +5,8 @@
 ## 实现完整性
 
 - [x] /help 输出含 12 条命令名/描述（验证：`./gradlew test -Dtest=BuiltinsTest#registerAll_allRegistered` 绿 + tmux 场景 A2）
-- [x] /plan 不调用 conv.addUser、不触发 LLM 回合（验证：`./gradlew test -Dtest=MewCodeModelTest#testTuiDispatch_PlanLocalOnly` 绿）
-- [x] /do 触发 LLM 回合且写入会话存档（验证：`./gradlew test -Dtest=MewCodeModelTest#testTuiDispatch_DoInjectsAndSends` 绿 + tmux 场景 D2 后 `tail -3 $SESSIONS_DIR/<latest>.jsonl` 含新增 role=user 记录）
+- [x] /plan 不调用 conv.addUser、不触发 LLM 回合（验证：`./gradlew test -Dtest=CortexModelTest#testTuiDispatch_PlanLocalOnly` 绿）
+- [x] /do 触发 LLM 回合且写入会话存档（验证：`./gradlew test -Dtest=CortexModelTest#testTuiDispatch_DoInjectsAndSends` 绿 + tmux 场景 D2 后 `tail -3 $SESSIONS_DIR/<latest>.jsonl` 含新增 role=user 记录）
 - [x] Builtins.registerAll(reg) 注册了恰好 12 条命令（验证：`./gradlew test -Dtest=BuiltinsTest#registerAll_allRegistered` 绿）
 - [x] 12 条命令的名字完整、命令名全小写、互不重复（验证：同上 + 看 test 断言列表）
 
@@ -20,11 +20,11 @@
 
 ## 命令分发与三类执行
 
-- [x] 提交 `/help` 后输出 12 行命令名/描述,且不调用 `conv.addUser`、不触发 LLM 回合（验证：`./gradlew test -Dtest=MewCodeModelTest#testTuiDispatch_HelpListsAllBuiltins` 绿）
-- [x] 提交未知命令 `/foobar` 后输出文本含子串"未知命令"与"/help"两个关键字；不触发 LLM 回合（验证：`./gradlew test -Dtest=MewCodeModelTest#testTuiUnknownSlashCommandFriendly` 绿）
-- [x] 提交 `/Help`（大小写混合）与 `/help` 行为一致（验证：`./gradlew test -Dtest=MewCodeModelTest#testTuiDispatch_CaseInsensitive` 绿）
+- [x] 提交 `/help` 后输出 12 行命令名/描述,且不调用 `conv.addUser`、不触发 LLM 回合（验证：`./gradlew test -Dtest=CortexModelTest#testTuiDispatch_HelpListsAllBuiltins` 绿）
+- [x] 提交未知命令 `/foobar` 后输出文本含子串"未知命令"与"/help"两个关键字；不触发 LLM 回合（验证：`./gradlew test -Dtest=CortexModelTest#testTuiUnknownSlashCommandFriendly` 绿）
+- [x] 提交 `/Help`（大小写混合）与 `/help` 行为一致（验证：`./gradlew test -Dtest=CortexModelTest#testTuiDispatch_CaseInsensitive` 绿）
 - [x] 空字符串/纯空白字符提交时既不进 LLM 也不进分发器（验证：人工跑 tmux 场景"空回车"看无任何输出新增）
-- [x] /do 提交后会向 `conv.addUser` 追加文本"请按上面的计划开始执行。"且立即触发 LLM 回合（验证：`./gradlew test -Dtest=MewCodeModelTest#testTuiDispatch_DoInjectsAndSends` 绿 或 tmux 场景观察）
+- [x] /do 提交后会向 `conv.addUser` 追加文本"请按上面的计划开始执行。"且立即触发 LLM 回合（验证：`./gradlew test -Dtest=CortexModelTest#testTuiDispatch_DoInjectsAndSends` 绿 或 tmux 场景观察）
 - [x] /review 提交后会向 `conv.addUser` 追加文本含子串"审查"且立即触发 LLM 回合（验证：同上）
 - [x] /compact 在 `SessionState.IDLE` 触发 `Agent.runForceCompact`；非 idle 状态打印"请等待当前任务完成"（验证：既有 `testTuiSlashCompactRoutesToCommand` 迁移版 + 非 idle 情况新加用例）
 - [x] handler 抛 non-null 异常时,用户看到 `errorBlock` 文案（验证：在单测中 mock 一个抛异常的 handler,断言 `app.pendingPrintln()` 含 `ERROR` 前缀）
@@ -51,8 +51,8 @@
 
 ## 集成
 
-- [x] /help、未命中提示、`Prompt.READY_HINT` 三处均不出现硬编码命令清单（验证：`grep -rE "/(exit|plan|do|compact|resume|help|clear|review|status|memory|permission|session)" src/main/java/com/mewcode/prompt/ src/main/java/com/mewcode/tui/Commands.java` 应只在新分发器代码内出现一次类型常量）
-- [x] 状态栏左侧 mode 徽章渲染与本 spec 实施前完全一致（验证：`git diff main -- src/main/java/com/mewcode/tui/Styles.java + MarkdownRenderer.java | grep -E "(modeLabel|modeStatusStyle|statusBar)"` 应无内部逻辑变更）
+- [x] /help、未命中提示、`Prompt.READY_HINT` 三处均不出现硬编码命令清单（验证：`grep -rE "/(exit|plan|do|compact|resume|help|clear|review|status|memory|permission|session)" src/main/java/com/cortex/prompt/ src/main/java/com/cortex/tui/Commands.java` 应只在新分发器代码内出现一次类型常量）
+- [x] 状态栏左侧 mode 徽章渲染与本 spec 实施前完全一致（验证：`git diff main -- src/main/java/com/cortex/tui/Styles.java + MarkdownRenderer.java | grep -E "(modeLabel|modeStatusStyle|statusBar)"` 应无内部逻辑变更）
 - [x] /resume、/compact 沿用 ch09 的 `SessionState.IDLE` 限制（验证：T10 后跑既有 ch09 验收场景一遍）
 
 ## 编译与测试
@@ -65,16 +65,16 @@
 
 ## 启动期冲突检测
 
-- [x] 在 `Builtins.java` 中临时把某条命令注册两次,`./gradlew exec:java -Dexec.mainClass=com.mewcode.MewCode` 立即抛 `IllegalStateException` 退出,异常文本含具体冲突的命令名（验证：人工临时改动 + 跑 mewcode + 还原）
+- [x] 在 `Builtins.java` 中临时把某条命令注册两次,`./gradlew exec:java -Dexec.mainClass=com.cortex.Cortex` 立即抛 `IllegalStateException` 退出,异常文本含具体冲突的命令名（验证：人工临时改动 + 跑 cortex + 还原）
 
 ## 端到端场景（tmux 实跑）
 
-> 验证目标：在真实 tmux 会话内运行 mewcode 二进制,按 plan/spec 描述跑完整流程。
-> 准备：`./gradlew shadowJar`；开一个 `~/.mewcode/memory/MEMORY.md` 保证 /memory 至少能列一条；`SESSIONS_DIR=$PWD/.mewcode/sessions`（按 mewcode 实际默认目录；如未自定义则使用 `${MEWCODE_HOME:-$PWD/.mewcode}/sessions`）。
+> 验证目标：在真实 tmux 会话内运行 cortex 二进制,按 plan/spec 描述跑完整流程。
+> 准备：`./gradlew shadowJar`；开一个 `~/.cortex/memory/MEMORY.md` 保证 /memory 至少能列一条；`SESSIONS_DIR=$PWD/.cortex/sessions`（按 cortex 实际默认目录；如未自定义则使用 `${MEWCODE_HOME:-$PWD/.cortex}/sessions`）。
 
 ### 场景 A: 启动与 /help
 
-- [x] **A1** 启动会话：`tmux new-session -d -s mewspec -x 200 -y 50 "java -jar build/libs/mewcode.jar 2>/tmp/mewcode.err"`；`sleep 2`；`tmux capture-pane -t mewspec -p | grep -E "(MewCode|Send a message|DEFAULT|PLAN|default|plan)"` 至少命中 2 个关键字
+- [x] **A1** 启动会话：`tmux new-session -d -s mewspec -x 200 -y 50 "java -jar build/libs/cortex.jar 2>/tmp/cortex.err"`；`sleep 2`；`tmux capture-pane -t mewspec -p | grep -E "(Cortex|Send a message|DEFAULT|PLAN|default|plan)"` 至少命中 2 个关键字
 - [x] **A2** 跑 /help：`tmux send-keys -t mewspec '/help' Enter`；`sleep 1`；`tmux capture-pane -t mewspec -p | head -30` 含 /clear、/compact、/do、/exit、/help、/memory、/permission、/plan、/resume、/review、/session、/status 全部 12 个名字,且按字典序排列
 
 ### 场景 B: 纯本地命令
@@ -119,12 +119,12 @@
 
 ### 场景 H: 启动期冲突检测
 
-- [x] **H1** 临时编辑 `src/main/java/com/mewcode/command/Builtins.java`,把 /help 命令再注册一次同名；`./gradlew -q exec:java -Dexec.mainClass=com.mewcode.MewCode 2>&1 | head -10`；输出含 `IllegalStateException` 与 "help"（或具体冲突文本）；还原 `Builtins.java`
+- [x] **H1** 临时编辑 `src/main/java/com/cortex/command/Builtins.java`,把 /help 命令再注册一次同名；`./gradlew -q exec:java -Dexec.mainClass=com.cortex.Cortex 2>&1 | head -10`；输出含 `IllegalStateException` 与 "help"（或具体冲突文本）；还原 `Builtins.java`
 
 ### 场景收尾
 
 - [x] **/exit 端到端验证**：`tmux send-keys -t mewspec '/exit' Enter`；`sleep 1`；`tmux has-session -t mewspec 2>&1` 应报 "can't find session"
-- [x] **错误日志可观察**：`wc -l < /tmp/mewcode.err` 输出为 0 或仅含白名单 info 行
+- [x] **错误日志可观察**：`wc -l < /tmp/cortex.err` 输出为 0 或仅含白名单 info 行
 - [x] 关闭测试会话（若 /exit 未成功）：`tmux kill-session -t mewspec 2>/dev/null || true`
 - [x] 所有截屏证据复制到本任务的端到端验证报告里（每个场景至少 1 张 capture 输出）
 

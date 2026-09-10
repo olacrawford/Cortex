@@ -27,9 +27,9 @@
 ### subagent.Definition
 
 ```java
-package com.mewcode.subagent;
+package com.cortex.subagent;
 
-import com.mewcode.permission.PermissionMode;
+import com.cortex.permission.PermissionMode;
 
 /**
  * Definition 是一个 Agent 角色的完整定义,从 Markdown + YAML frontmatter 解析。
@@ -72,7 +72,7 @@ public enum Source {
 ### subagent.Catalog
 
 ```java
-package com.mewcode.subagent;
+package com.cortex.subagent;
 
 public final class Catalog {
     private final Object lock = new Object();
@@ -100,7 +100,7 @@ public final class Catalog {
 ### task.Manager 与 BackgroundTask
 
 ```java
-package com.mewcode.task;
+package com.cortex.task;
 
 /**
  * BackgroundTask 是一个后台子 Agent 的完整状态快照。
@@ -108,8 +108,8 @@ package com.mewcode.task;
 public final class BackgroundTask {
     final String id;                 // manager 生成,如 "task_<8 字节十六进制>"
     final String name;               // F1 中 Agent 工具 name 参数,可空
-    final com.mewcode.agent.Agent subAgent;
-    final com.mewcode.conversation.ConversationManager conv;
+    final com.cortex.agent.Agent subAgent;
+    final com.cortex.conversation.ConversationManager conv;
     final String task;               // 初始任务文本(SendMessage 不更新此字段)
     volatile Status status;          // RUNNING / COMPLETED / FAILED / CANCELLED
     volatile String result;          // 跑完的最终文本
@@ -144,8 +144,8 @@ public final class Manager {
      * 返回 ID;virtual thread 内部跑完后写 status/result + submit 到 donePub。
      */
     public String launch(java.util.concurrent.atomic.AtomicBoolean parentCancel,
-                         com.mewcode.agent.Agent ag,
-                         com.mewcode.conversation.ConversationManager conv,
+                         com.cortex.agent.Agent ag,
+                         com.cortex.conversation.ConversationManager conv,
                          String name, String task) { ... }
 
     /**
@@ -154,8 +154,8 @@ public final class Manager {
      * 并把已 partial 收集的事件吐到 partial 内。Manager 接管 eventSub 事件流继续消费,直到 Done 或 Err。
      */
     public String adoptRunning(java.util.concurrent.atomic.AtomicBoolean parentCancel,
-                               com.mewcode.agent.Agent ag,
-                               com.mewcode.conversation.ConversationManager conv,
+                               com.cortex.agent.Agent ag,
+                               com.cortex.conversation.ConversationManager conv,
                                String name,
                                java.util.concurrent.Flow.Subscription eventSub,
                                java.util.concurrent.atomic.AtomicBoolean cancelFlag,
@@ -187,7 +187,7 @@ public final class Manager {
 ### agent 包扩展
 
 ```java
-package com.mewcode.agent;
+package com.cortex.agent;
 
 public final class Agent {
 
@@ -204,7 +204,7 @@ public final class Agent {
      *     TaskManager 借此聚合 toolCount/lastActivity,TUI 借此渲染前台子 Agent 的进度
      */
     public String runToCompletion(java.util.concurrent.atomic.AtomicBoolean cancelFlag,
-                                  com.mewcode.conversation.ConversationManager conv,
+                                  com.cortex.conversation.ConversationManager conv,
                                   String task,
                                   java.util.concurrent.BlockingQueue<AgentEvent> events) throws Exception { ... }
 
@@ -213,12 +213,12 @@ public final class Agent {
     public static final class Builder {
         // ... 已有
         public Builder systemPrompt(String text) { ... }           // 子 Agent 角色 prompt
-        public Builder provider(com.mewcode.llm.Provider p) { ... }
+        public Builder provider(com.cortex.llm.Provider p) { ... }
         public Builder maxTurns(int n) { ... }
-        public Builder permissionMode(com.mewcode.permission.PermissionMode m) { ... }
+        public Builder permissionMode(com.cortex.permission.PermissionMode m) { ... }
         public Builder dontAsk(boolean enabled) { ... }            // 子 Agent dontAsk 模式
         public Builder approvalUpgrader(ApprovalUpgrader fn) { ... } // 升级到父 TUI 的 callback
-        public Builder parentRegistry(com.mewcode.tool.ToolToolRegistry registry) { ... } // 暂时与 registry 等价,显式区分语义
+        public Builder parentRegistry(com.cortex.tool.ToolToolRegistry registry) { ... } // 暂时与 registry 等价,显式区分语义
     }
 
     /**
@@ -228,7 +228,7 @@ public final class Agent {
      */
     @FunctionalInterface
     public interface ApprovalUpgrader {
-        java.util.Optional<com.mewcode.permission.Outcome> upgrade(
+        java.util.Optional<com.cortex.permission.Outcome> upgrade(
                 java.util.concurrent.atomic.AtomicBoolean cancelFlag,
                 ApprovalRequest req);
     }
@@ -245,7 +245,7 @@ public final class Agent {
 ### Fork.java 内容
 
 ```java
-package com.mewcode.agent;
+package com.cortex.agent;
 
 public final class Fork {
 
@@ -274,28 +274,28 @@ public final class Fork {
      *   3. 追加 user 消息 = FORK_BOILERPLATE + task
      * 返回新消息列表,直接用 Conversation.fromMessages 装载即可。
      */
-    public static java.util.List<com.mewcode.llm.Message> buildForkedMessages(
-            java.util.List<com.mewcode.llm.Message> parentMsgs, String task) { ... }
+    public static java.util.List<com.cortex.llm.Message> buildForkedMessages(
+            java.util.List<com.cortex.llm.Message> parentMsgs, String task) { ... }
 
     /**
      * isForkContext 判定一个 conversation 的消息历史是否来自 Fork(用 FORK_BOILERPLATE_TAG 扫描)。
      * QuerySource 检测的兜底机制——caller 链丢失时靠这个。
      */
-    public static boolean isForkContext(java.util.List<com.mewcode.llm.Message> msgs) { ... }
+    public static boolean isForkContext(java.util.List<com.cortex.llm.Message> msgs) { ... }
 }
 ```
 
 ### Agent 工具
 
-`dev/mewcode/agent/AgentTool.java`：
+`dev/cortex/agent/AgentTool.java`：
 
 ```java
-package com.mewcode.agent;
+package com.cortex.agent;
 
 /**
  * AgentTool 是注册到 ToolRegistry 的统一 Agent 工具。
  */
-public final class AgentTool implements com.mewcode.tool.Tool {
+public final class AgentTool implements com.cortex.tool.Tool {
     private final AgentCatalogPort catalog;     // 接口,避免反向依赖 subagent 包
     private final TaskManagerPort taskMgr;
     private volatile Agent parentAgent;         // 取 provider/registry/eng/runtime 等
@@ -327,16 +327,16 @@ public final class AgentTool implements com.mewcode.tool.Tool {
      *  10. 后台路径:launch,返回 {task_id, status:"async_launched"}
      */
     @Override
-    public com.mewcode.tool.ToolResult execute(com.mewcode.tool.ExecutionContext ctx, com.fasterxml.jackson.databind.JsonNode args) { ... }
+    public com.cortex.tool.ToolResult execute(com.cortex.tool.ExecutionContext ctx, com.fasterxml.jackson.databind.JsonNode args) { ... }
 }
 ```
 
 ### 工具过滤多层防线
 
-`dev/mewcode/tool/Filter.java`:
+`dev/cortex/tool/Filter.java`:
 
 ```java
-package com.mewcode.tool;
+package com.cortex.tool;
 
 public final class Filter {
 
@@ -384,17 +384,17 @@ public final class Filter {
 
 ### TUI 集成层
 
-`dev/mewcode/tui/MewCodeModel.java` 改动：
+`dev/cortex/tui/CortexModel.java` 改动：
 - `TuiParams` record 加 `Manager taskMgr / Catalog subAgentCatalog`(由 Main 注入)
-- `MewCodeModel` 持有 `taskMgr` / `subAgentCatalog`
+- `CortexModel` 持有 `taskMgr` / `subAgentCatalog`
 - `init()` 末尾启动一个 virtual thread 订阅 `taskMgr.subscribeDone()`,把 `<task-notification>` 拼成 reminder 推到 `runtime.appendReminders`
 - 主对话 Agent 通过 `Agent.Builder.approvalUpgrader(taskMgr::upgradeApproval)` 让子 Agent 审批升级回主 TUI
 
-`dev/mewcode/tui/Stream.java` 改动：
+`dev/cortex/tui/Stream.java` 改动：
 - `updateStreaming` 监听 ESC 键(JLine/tui.tea `KeyType.Escape`):若 `state==STREAMING` 且当前有运行中的 SubAgent → 调 `taskMgr.adoptRunning`,切回 IDLE 态
 - 监听 SubAgent ApprovalRequest 转发——TaskManager 通过 events publisher 转回主 TUI 走现有 Approval 路径
 
-`dev/mewcode/tui/SkillFork.java` 改造：
+`dev/cortex/tui/SkillFork.java` 改造：
 - 删除现有 `runSubAgent` 内的零散逻辑
 - 改为调 `subagent.LaunchFork.launch(ctx, host, opts, conv)`,host 持有 `taskMgr` / `runtime` / `engine` 等
 
@@ -412,7 +412,7 @@ public final class Filter {
 - `Catalog.resolve(name)` / `list()` / `forkDefinition()`
 
 **依赖:**
-- `com.mewcode.permission`(解析 `permissionMode` 字段)
+- `com.cortex.permission`(解析 `permissionMode` 字段)
 - `org.yaml:snakeyaml`
 - JDK `java.nio.file`、`java.lang.Class#getResourceAsStream`
 
@@ -433,10 +433,10 @@ public final class Filter {
 - `new TaskListTool(Manager m)` 等四个工厂
 
 **依赖:**
-- `com.mewcode.agent`(Agent)
-- `com.mewcode.conversation`
-- `com.mewcode.tool`
-- `com.mewcode.llm`
+- `com.cortex.agent`(Agent)
+- `com.cortex.conversation`
+- `com.cortex.tool`
+- `com.cortex.llm`
 
 **关键设计:**
 - `donePub` 是 `BlockingQueue<String>`,`maxBufferCapacity` 设为 32 够大,正常场景不可能填满;真满时 `offer` 返回负数 → 走 stderr 警告(主 TUI 漏一条通知不致命)
@@ -508,7 +508,7 @@ public final class Filter {
 ### 启动期 wiring
 
 ```
-MewCode.java
+Cortex.java
   ├── new ToolRegistry()       → registry
   ├── new PermissionEngine(root) → engine
   ├── new SessionRuntime        → runtime
@@ -520,17 +520,17 @@ MewCode.java
   ├── registry.register(new task.TaskGetTool(taskMgr))     ← 新增
   ├── registry.register(new task.TaskStopTool(taskMgr))    ← 新增
   ├── registry.register(new task.SendMessageTool(taskMgr)) ← 新增
-  ├── new MewCodeModel(..., TuiParams(taskMgr, subagentCatalog, ...))
+  ├── new CortexModel(..., TuiParams(taskMgr, subagentCatalog, ...))
   │     │
-  │     └── 在 MewCodeModel 构造内:Agent 工具的注册被推迟到主 Agent 构造后(因为要把 parentAgent 注入),
+  │     └── 在 CortexModel 构造内:Agent 工具的注册被推迟到主 Agent 构造后(因为要把 parentAgent 注入),
   │         或者 Agent 工具 lazy 拿:把 catalog/taskMgr 写死,parentAgent 通过 setParent 注入
 ```
 
-**简化方案:** Agent 工具在 `MewCode.java` 注册,`parentAgent` 字段在 `new MewCodeModel(...)` 后回填:
+**简化方案:** Agent 工具在 `Cortex.java` 注册,`parentAgent` 字段在 `new CortexModel(...)` 后回填:
 ```java
 AgentTool agentTool = new AgentTool(subagentCatalog, taskMgr, null, cfg.enableSubAgentBackground());
 registry.register(agentTool);
-// 再 new MewCodeModel(...)
+// 再 new CortexModel(...)
 // 再 agentTool.setParent(tuiApp.mainAgent());
 ```
 
@@ -594,7 +594,7 @@ taskMgr.launch virtual thread:
         // 缓冲满,丢弃 + stderr 警告
     }
     ↓
-MewCodeModel.consumeTaskDone (virtual thread,donePub.subscribe):
+CortexModel.consumeTaskDone (virtual thread,donePub.subscribe):
     onNext(taskId):
         var t = taskMgr.get(taskId);
         String notification = buildTaskNotification(t);  // <task-notification>...</task-notification>
@@ -638,7 +638,7 @@ AgentTool.execute:
 ### Skill fork 改造
 
 ```
-MewCodeModel.execute("/foo") → skills.Executor.execute → fork closure runSubAgent
+CortexModel.execute("/foo") → skills.Executor.execute → fork closure runSubAgent
     ↓ (改造后)
 runSubAgent(cancelFlag, conv, opts):
     return subagent.LaunchFork.launch(cancelFlag, LaunchFork.fromTui(this), new ForkLaunchOpts(
@@ -656,8 +656,8 @@ runSubAgent(cancelFlag, conv, opts):
 ## 文件组织
 
 ```
-mewcode/
-├── src/main/java/com/mewcode/
+cortex/
+├── src/main/java/com/cortex/
 │   ├── subagent/                        ← 新增包
 │   │   ├── package-info.java            包注释
 │   │   ├── Definition.java              Definition record / Source enum
@@ -692,7 +692,7 @@ mewcode/
 │   │   └── Filter.java                  ← 新增 ALL_AGENT_DISALLOWED / ASYNC_AGENT_ALLOWED / applyAgentToolFilter
 │   │
 │   ├── tui/                             ← 现有包改动
-│   │   ├── MewCodeModel.java                  加 taskMgr / subAgentCatalog 字段 + consumeTaskDone virtual thread + AgentTool 注册
+│   │   ├── CortexModel.java                  加 taskMgr / subAgentCatalog 字段 + consumeTaskDone virtual thread + AgentTool 注册
 │   │   ├── Stream.java                  updateStreaming 加 ESC → adoptRunning 分支;子 Agent ApprovalRequest 转发
 │   │   ├── Tasks.java                   ← 新增 consumeTaskDone + buildTaskNotification + ESC 切后台辅助
 │   │   ├── SkillFork.java               ← 改造为复用 subagent.LaunchFork
@@ -707,7 +707,7 @@ mewcode/
 │       ├── explore.md
 │       └── plan.md
 │
-├── src/test/java/dev/mewcode/
+├── src/test/java/dev/cortex/
 │   ├── subagent/ParserTest.java
 │   ├── subagent/CatalogTest.java
 │   ├── subagent/LaunchForkTest.java
@@ -718,9 +718,9 @@ mewcode/
 │   ├── agent/AgentToolTest.java
 │   ├── agent/AgentToolIntegrationTest.java
 │   ├── tool/FilterTest.java
-│   └── tui/MewCodeModelTest.java
+│   └── tui/CortexModelTest.java
 │
-└── src/main/java/com/mewcode/MewCode.java  ← 加 Catalog.load / new Manager / 4 个工具注册 / AgentTool 注册
+└── src/main/java/com/cortex/Cortex.java  ← 加 Catalog.load / new Manager / 4 个工具注册 / AgentTool 注册
 ```
 
 ## 技术决策
@@ -737,7 +737,7 @@ mewcode/
 | `sendMessage` 同 id 复用 | 是 | 状态语义上是"该任务继续",而非"新任务";UI/查询体验更连贯 |
 | 配置开关 `enableSubAgentBackground` | 默认 true | 后台是核心能力,默认开启;关闭后所有子 Agent 强制前台,主要供 CI / 调试用 |
 | Markdown 解析器复用 | 不共享,subagent 包独立实现一份(几乎与 `skills.Parser` 一致) | 避免抽公共包导致循环依赖;两个包字段不一样,复用收益有限 |
-| Agent 工具的 parent 注入时机 | `MewCode.java` 注册时为 null,`new MewCodeModel(...)` 后 `setParent` 回填 | `ToolRegistry` 在 `new MewCodeModel(...)` 之前已构造,Agent 工具的 parent 依赖 `tuiApp.mainAgent()` 反推 |
+| Agent 工具的 parent 注入时机 | `Cortex.java` 注册时为 null,`new CortexModel(...)` 后 `setParent` 回填 | `ToolRegistry` 在 `new CortexModel(...)` 之前已构造,Agent 工具的 parent 依赖 `tuiApp.mainAgent()` 反推 |
 | ESC 切后台 vs Ctrl+C | ESC 切后台,Ctrl+C 仍是取消(沿用现有) | ESC 在 TUI 已经做"取消选择"用途,但流式态下 ESC 转为切后台是 ch13 README 设计 |
 | 并发模型 | virtual thread + `BlockingQueue`(`BlockingQueue`)+ `AtomicBoolean` 取消 | Java 21 GA;子 Agent 长跑用 virtual thread 成本极低;`BlockingQueue` 是 JDK 原生 reactive 接口,零外部依赖;`AtomicBoolean` 等价于 Go 的 `ctx.Done()` 信号位 |
 | 内置 Markdown 资源 | classpath resource(`src/main/resources/subagent/builtin/*.md`)+ `Class.getResourceAsStream` | Java 没有 `go:embed`,classpath resource 是标准做法,Gradle 打 fat jar 时自动打包 |

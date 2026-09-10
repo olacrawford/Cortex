@@ -1,6 +1,6 @@
 # 项目记忆与会话持久化 Spec## 背景
 
-mewcode 当前是无状态的：每次启动都是全新会话，不知道用户是谁、项目有什么规范、上次聊到哪里。ch08 解决了"单进程内长时间工作不崩"的问题，但进程一退出，所有对话历史和工作上下文就全丢了。
+cortex 当前是无状态的：每次启动都是全新会话，不知道用户是谁、项目有什么规范、上次聊到哪里。ch08 解决了"单进程内长时间工作不崩"的问题，但进程一退出，所有对话历史和工作上下文就全丢了。
 
 实际编码场景里，用户会反复回到同一个项目，有稳定的编码规范、个人偏好和未完成的工作。每次重新解释一遍这些上下文，既浪费时间又容易遗漏。
 
@@ -21,17 +21,17 @@ mewcode 当前是无状态的：每次启动都是全新会话，不知道用户
 - G7：过期会话（30 天以上）在启动时自动清理，防止磁盘无限增长。
 - G8：session ID 格式统一改为 `YYYYMMDD-HHMMSS-xxxx`，新格式同时覆盖 ch08 的工具结果落盘目录和本章的 JSONL 存档。
 
-## 功能需求### 第 1 层：项目指令文件（MEWCODE.md）- **F1**：系统启动时按以下顺序扫描三个路径，找到就加载、找不到就跳过：① `<project_root>/MEWCODE.md`（项目级，最高优先级）；② `<project_root>/.mewcode/MEWCODE.md`（项目配置级）；③ `~/.mewcode/MEWCODE.md`（用户级，最低优先级）。三份文件的内容按此优先级顺序拼接——高优先级在前，模型优先遵循；各层之间用空行分隔。
+## 功能需求### 第 1 层：项目指令文件（MEWCODE.md）- **F1**：系统启动时按以下顺序扫描三个路径，找到就加载、找不到就跳过：① `<project_root>/MEWCODE.md`（项目级，最高优先级）；② `<project_root>/.cortex/MEWCODE.md`（项目配置级）；③ `~/.cortex/MEWCODE.md`（用户级，最低优先级）。三份文件的内容按此优先级顺序拼接——高优先级在前，模型优先遵循；各层之间用空行分隔。
 - **F2**：`@include` 引用语法：在 MEWCODE.md 中以独占一行的形式写 `@include <relative_path>`（`@include` 后跟一个空格再跟路径）。路径相对于当前文件所在目录解析。`@include` 行被引用文件的完整内容替换；引用文件内部可以继续出现 `@include`。不在独占行上的 `@include`（如出现在段落中间）不做替换，保持原文。
 - **F3**：`@include` 嵌套深度限制为 5 层（从 MEWCODE.md 算第 1 层，被它 include 的文件算第 2 层，以此类推）。超过 5 层的 `@include` 行保留原文不展开，并在返回结果中追加一行警告注释 `<!-- @include 超过最大嵌套深度，已跳过: <path> -->`。
 - **F4**：`@include` 环路检测：维护一个 visited 集合（已解析为绝对路径的文件集合），同一个绝对路径在一条展开链上不会被加载两次。命中环路时跳过该 `@include` 行并追加警告注释 `<!-- @include 检测到环路，已跳过: <path> -->`。
-- **F5**：`@include` 路径逃逸检测：解析后的绝对路径必须仍在当前指令文件所属的"根边界"之内——项目级文件（路径 ① ②）的根边界是 `<project_root>`；用户级文件（路径 ③）的根边界是 `~/.mewcode/`。跳出边界的路径不加载，追加警告注释 `<!-- @include 路径超出允许范围，已跳过: <path> -->`。
+- **F5**：`@include` 路径逃逸检测：解析后的绝对路径必须仍在当前指令文件所属的"根边界"之内——项目级文件（路径 ① ②）的根边界是 `<project_root>`；用户级文件（路径 ③）的根边界是 `~/.cortex/`。跳出边界的路径不加载，追加警告注释 `<!-- @include 路径超出允许范围，已跳过: <path> -->`。
 - **F6**：找不到的文件静默跳过（非错误），空文件产出空内容（不影响拼接）。二进制文件（前 512 字节中包含 `\x00`）视为不可读，跳过并追加警告注释。
 - **F7**：加载完成后，拼接结果注入系统提示的 `custom-instructions` 模块槽位（priority 80）。`buildSystemPrompt` 接受指令文本和记忆文本两个参数，非空时填入对应模块。
 - **F8**：指令加载在进程启动时执行一次，结果缓存到 `Prompt.Module` 的 content 字段，整个进程生命周期内不变。后续章节可以引入文件监听热更新，本章不做。
 
 ### 第 2 层：会话存档（JSONL）#### Session ID 与目录- **F9**：session ID 格式改为 `YYYYMMDD-HHMMSS-xxxx`，其中 `YYYYMMDD-HHMMSS` 取进程启动时刻的本地时间，`xxxx` 为 4 字符随机十六进制后缀（防同秒碰撞）。此格式同时适用于 ch08 的工具结果落盘和本章的 JSONL 存档。修改 `compact/SessionContext.java` 的 `newSessionId()` 方法。
-- **F10**：`SessionContext` 新增 `sessionDir` 字段（`<workspace>/.mewcode/sessions/<session_id>`），原有 `spillDir` 改为 `sessionDir + "/tool-results"`。JSONL 存档路径为 `sessionDir + "/conversation.jsonl"`。
+- **F10**：`SessionContext` 新增 `sessionDir` 字段（`<workspace>/.cortex/sessions/<session_id>`），原有 `spillDir` 改为 `sessionDir + "/tool-results"`。JSONL 存档路径为 `sessionDir + "/conversation.jsonl"`。
 
 #### JSONL 格式- **F11**：每条消息序列化为一行 JSON，写入 `conversation.jsonl`。字段：
   - `role`（string，必需）：`"user"` / `"assistant"` / `"tool"`
@@ -48,7 +48,7 @@ mewcode 当前是无状态的：每次启动都是全新会话，不知道用户
 - **F16**：进程退出时 `Writer.close()` 关闭文件句柄。`Writer` 实现 `java.io.Closeable`。
 
 ### 第 3 层：会话恢复- **F17**：TUI 新增 `/resume` 内置命令，仅在 `SessionState.IDLE` 状态可用（Agent 不在运行中）。
-- **F18**：`/resume` 触发后，扫描 `.mewcode/sessions/` 下所有子目录，找到包含 `conversation.jsonl` 的有效会话。按最后修改时间倒序排列（最新在前）。
+- **F18**：`/resume` 触发后，扫描 `.cortex/sessions/` 下所有子目录，找到包含 `conversation.jsonl` 的有效会话。按最后修改时间倒序排列（最新在前）。
 - **F19**：会话列表 UI 复用 Lanterna `ActionListBox`/`RadioBoxList` 组件：上下键导航、键盘字符触发搜索过滤、Enter 选择、Esc 取消。TUI 新增 `SessionState.RESUMING` 状态。
 - **F20**：每条列表项展示四项信息：
   - 标题：第一条 role=user 消息的 content，截断到 50 个字符（含省略号）
@@ -65,7 +65,7 @@ mewcode 当前是无状态的：每次启动都是全新会话，不知道用户
 - **F23**：恢复过程中 TUI 显示加载提示，恢复完成后显示系统消息：`"已恢复会话 <session_id>，共 <N> 条消息"`。
 - **F24**：原来的新会话的 JSONL 保留在磁盘上（可能已有几行），不删除。
 
-#### 会话清理- **F25**：进程启动时扫描 `.mewcode/sessions/`，删除 session ID 中的时间戳距当前超过 30 天的会话目录（整个子目录，含 JSONL 和 tool-results）。
+#### 会话清理- **F25**：进程启动时扫描 `.cortex/sessions/`，删除 session ID 中的时间戳距当前超过 30 天的会话目录（整个子目录，含 JSONL 和 tool-results）。
 - **F26**：清理在后台 virtual thread 执行，不阻塞启动流程。清理失败的单个目录跳过不影响其他目录。
 
 ### 第 4 层：自动笔记（Memory）#### 笔记存储- **F27**：笔记分四类：`user_preference`（用户偏好）、`correction_feedback`（纠正反馈）、`project_knowledge`（项目知识）、`reference_material`（参考资料）。
@@ -79,7 +79,7 @@ mewcode 当前是无状态的：每次启动都是全新会话，不知道用户
   ---
   用户偏好简洁回复，每次完成后不要在结尾重述刚做了什么。
   ```
-- **F29**：笔记分两级存放——项目级 `.mewcode/memory/`，用户级 `~/.mewcode/memory/`。项目级笔记记录与当前项目相关的信息（项目知识、参考资料），用户级笔记记录跨项目通用的信息（用户偏好、纠正反馈）。具体分级由 LLM 判断。
+- **F29**：笔记分两级存放——项目级 `.cortex/memory/`，用户级 `~/.cortex/memory/`。项目级笔记记录与当前项目相关的信息（项目知识、参考资料），用户级笔记记录跨项目通用的信息（用户偏好、纠正反馈）。具体分级由 LLM 判断。
 - **F30**：每级有一个索引文件 `MEMORY.md`，每行一条笔记摘要。格式：`- [<type>] <title> — <一句话描述>`。索引文件不超过 200 行 / 25KB。超出时由 LLM 在更新时决定合并或淘汰旧条目。
 - **F31**：文件名由 LLM 生成，格式为 `<type>_<short_slug>.md`（如 `user_preference_terse_replies.md`、`project_knowledge_api_conventions.md`）。slug 全小写、下划线分隔。
 
@@ -132,7 +132,7 @@ mewcode 当前是无状态的：每次启动都是全新会话，不知道用户
 - **AC5（环路检测）**：A include B、B include A → 第二次 include 不展开，出现环路警告注释。
 - **AC6（路径逃逸）**：项目级 MEWCODE.md 中 `@include ../../etc/passwd` → 不加载，出现范围警告注释。
 
-### 会话存档- **AC7（Session ID 格式）**：启动进程 → session ID 形如 `20260601-143022-a1b2`，`.mewcode/sessions/` 下能找到对应目录。
+### 会话存档- **AC7（Session ID 格式）**：启动进程 → session ID 形如 `20260601-143022-a1b2`，`.cortex/sessions/` 下能找到对应目录。
 - **AC8（JSONL 写入）**：发送一条消息、得到回复 → `conversation.jsonl` 包含至少两行（user + assistant），每行可解析为合法 JSON，包含 role、content、ts 字段。第一行额外包含 model 字段。
 - **AC9（压缩标记）**：触发一次压缩 → JSONL 中出现 `{"type":"compact","ts":...}` 标记行，其后跟压缩后的消息。
 - **AC10（崩溃安全）**：模拟 Writer 写入中途被 kill → 重新打开 JSONL，除最后一行可能不完整外，之前的行全部可正常解析。
@@ -149,7 +149,7 @@ mewcode 当前是无状态的：每次启动都是全新会话，不知道用户
 ### 会话清理- **AC19（过期清理）**：手动创建一个 31 天前时间戳的 session 目录 → 启动进程后该目录被删除。
 - **AC20（新格式保护）**：手动创建一个旧格式 session ID（如 `1717000000-abc12345`）的目录 → 启动后不被删除也不在 /resume 列表中出现。
 
-### 自动笔记- **AC21（笔记创建）**：在对话中明确表达一个偏好（如"回复简洁点"）→ Agent 回复后，`.mewcode/memory/` 或 `~/.mewcode/memory/` 下出现对应类型的 .md 文件，frontmatter 包含 type、title、created。
+### 自动笔记- **AC21（笔记创建）**：在对话中明确表达一个偏好（如"回复简洁点"）→ Agent 回复后，`.cortex/memory/` 或 `~/.cortex/memory/` 下出现对应类型的 .md 文件，frontmatter 包含 type、title、created。
 - **AC22（索引更新）**：创建一条笔记后 → 对应级别的 `MEMORY.md` 中出现该笔记的摘要行。
 - **AC23（记忆注入）**：MEMORY.md 有内容时启动新会话 → 系统提示的 long-term-memory 模块包含索引内容。
 - **AC24（异步不阻塞）**：记忆更新正在执行时用户发送下一条消息 → 消息立即被处理，不等待记忆更新完成。

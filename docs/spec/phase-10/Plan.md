@@ -2,25 +2,25 @@
 
 ## 架构概览
 
-新增一个 `com.mewcode.skills` 包承载所有 Skill 相关的"数据 + 加载 + 执行 + 激活态"逻辑，与现有 `com.mewcode.command`、`com.mewcode.tool`、`com.mewcode.prompt`、`com.mewcode.agent` 通过细窄接口交互。
+新增一个 `com.cortex.skills` 包承载所有 Skill 相关的"数据 + 加载 + 执行 + 激活态"逻辑，与现有 `com.cortex.command`、`com.cortex.tool`、`com.cortex.prompt`、`com.cortex.agent` 通过细窄接口交互。
 
 按职责拆解：
 
-- **com.mewcode.skills**：核心包。包含数据结构（`Skill`、`SkillMeta`、`ActiveEntry`）、`SKILL.md` 解析、`Catalog` 两层路径扫描与覆盖、Skill 执行器（inline / fork 分支）、`ActiveSkills` 跨轮列表、`$ARGUMENTS` 渲染、`InstallSkill` zip 解压（zip-slip 防护）
-- **com.mewcode.tool.LoadSkillTool**：新增 LoadSkill 工具实现。是系统工具，永远可见，不带权限拦截
-- **com.mewcode.tool.InstallSkillTool**：新增 InstallSkill 工具实现。普通工具，受权限模式约束
-- **com.mewcode.tool.ToolRegistry**：扩展——增加"系统工具"标记与 `filterByAllowed(List<String> allowed)` 切片导出能力
-- **com.mewcode.command**：扩展——`registerSkillsAsCommands(registry, catalog, executor)` 把 Catalog 中每个 Skill 注册为 KindPrompt 命令；新增 `/skill` 命令（KindLocal，列出 Catalog）；`UI` 接口扩展 `listCatalogSkills / listActiveSkills / clearActiveSkills`
-- **com.mewcode.prompt**：扩展——`OptionalModules` 中现有的"active-skills"槽位重命名为"skills-catalog"，承载第一阶段名字+描述列表；新增 `renderActiveSkillsBlock(entries)` 函数供 env context 拼装
-- **com.mewcode.agent**：扩展——`SessionRuntime` 新增 `ActiveSkills activeSkills` 字段；`Agent` 新增 `withCatalog` / `withSkillExecutor` 构造选项；`run` 每轮重建 `sys` 时把 Catalog 列表传入 `buildSystemPrompt`、`envText` 拼接时调用 `renderActiveSkillsBlock`；新增 `clearActiveSkills() / activateSkill / listActive` 入口供 UI 与工具调用
-- **com.mewcode.tui**：扩展——Model 持有 catalog 引用与执行器；`handleClear` 路径在 `clearAndNewSession` 后调 `activeSkills.clear`；UI 接口对应新增方法实现
+- **com.cortex.skills**：核心包。包含数据结构（`Skill`、`SkillMeta`、`ActiveEntry`）、`SKILL.md` 解析、`Catalog` 两层路径扫描与覆盖、Skill 执行器（inline / fork 分支）、`ActiveSkills` 跨轮列表、`$ARGUMENTS` 渲染、`InstallSkill` zip 解压（zip-slip 防护）
+- **com.cortex.tool.LoadSkillTool**：新增 LoadSkill 工具实现。是系统工具，永远可见，不带权限拦截
+- **com.cortex.tool.InstallSkillTool**：新增 InstallSkill 工具实现。普通工具，受权限模式约束
+- **com.cortex.tool.ToolRegistry**：扩展——增加"系统工具"标记与 `filterByAllowed(List<String> allowed)` 切片导出能力
+- **com.cortex.command**：扩展——`registerSkillsAsCommands(registry, catalog, executor)` 把 Catalog 中每个 Skill 注册为 KindPrompt 命令；新增 `/skill` 命令（KindLocal，列出 Catalog）；`UI` 接口扩展 `listCatalogSkills / listActiveSkills / clearActiveSkills`
+- **com.cortex.prompt**：扩展——`OptionalModules` 中现有的"active-skills"槽位重命名为"skills-catalog"，承载第一阶段名字+描述列表；新增 `renderActiveSkillsBlock(entries)` 函数供 env context 拼装
+- **com.cortex.agent**：扩展——`SessionRuntime` 新增 `ActiveSkills activeSkills` 字段；`Agent` 新增 `withCatalog` / `withSkillExecutor` 构造选项；`run` 每轮重建 `sys` 时把 Catalog 列表传入 `buildSystemPrompt`、`envText` 拼接时调用 `renderActiveSkillsBlock`；新增 `clearActiveSkills() / activateSkill / listActive` 入口供 UI 与工具调用
+- **com.cortex.tui**：扩展——Model 持有 catalog 引用与执行器；`handleClear` 路径在 `clearAndNewSession` 后调 `activeSkills.clear`；UI 接口对应新增方法实现
 
 ## 核心数据结构
 
 ### SkillMeta
 
 ```java
-package com.mewcode.skills;
+package com.cortex.skills;
 
 import java.util.List;
 
@@ -83,8 +83,8 @@ public final class Catalog {
 ```
 
 `Catalog.load` 按顺序扫描：
-1. `~/.mewcode/skills/*` 子目录（`source=USER`）
-2. `<workDir>/.mewcode/skills/*` 子目录（`source=PROJECT`）
+1. `~/.cortex/skills/*` 子目录（`source=USER`）
+2. `<workDir>/.cortex/skills/*` 子目录（`source=PROJECT`）
 
 后扫到的同名 `name` 覆盖前者。
 
@@ -131,7 +131,7 @@ public final class Executor {
 
 ## 模块设计
 
-### com.mewcode.skills.SkillParser
+### com.cortex.skills.SkillParser
 **职责**：解析单个 Skill 目录 → `Skill`
 **对外接口**：`static Skill parseSkillDir(Path dir, SkillSource source) throws SkillParseException`
 **依赖**：`org.yaml:snakeyaml`（已在 build.gradle.kts 中）
@@ -141,14 +141,14 @@ public final class Executor {
 2. SnakeYAML `Load.loadFromString(frontmatter)` → `Map<String,Object>` → 手动绑定 `SkillMeta`；校验 name 合法性、mode / fork_context 取值
 4. 组装 `Skill` 返回
 
-### com.mewcode.skills.Catalog
+### com.cortex.skills.Catalog
 **职责**：两层路径扫描与覆盖管理
 **对外接口**：`load / reload / get / list / names / validateTools`
-**依赖**：`com.mewcode.skills.SkillParser`、JDK `java.nio.file`
+**依赖**：`com.cortex.skills.SkillParser`、JDK `java.nio.file`
 
 `validateTools`：遍历 Catalog 中所有 Skill 的 `meta.allowedTools`，确认每个名字都能在传入的 `ToolRegistry` 里 `get` 到；记录所有不通过项返回。
 
-### com.mewcode.skills.Render
+### com.cortex.skills.Render
 **职责**：把 Skill body 渲染为最终注入文本（inline 和 fork 路径都先经过这一层）
 **对外接口**：`static String renderBody(Skill skill, String args)`
 
@@ -157,7 +157,7 @@ public final class Executor {
 - 若无占位符且 args 非空（trim 后非空），在末尾追加 `\n\n## User Request\n\n<args>`
 - 若 `meta.allowedTools` 非空，在 body 顶部插一段 `This skill is designed to use only these tools: <list>. Prefer them over other tools when possible.\n\n---\n\n`
 
-### com.mewcode.skills.Executor
+### com.cortex.skills.Executor
 **职责**：inline / fork 分发与执行
 **对外接口**：`Executor` 构造 / `execute`
 
@@ -184,19 +184,19 @@ fork 分支：
 
 任一步骤出错：返回 `finalText = "[skill <name> failed: <reason>]"`，仍以 assistant 消息写入主对话。
 
-### com.mewcode.skills.Install
-**职责**：InstallSkill 的核心逻辑——下载 zip、校验路径、解压到 ~/.mewcode/skills/
+### com.cortex.skills.Install
+**职责**：InstallSkill 的核心逻辑——下载 zip、校验路径、解压到 ~/.cortex/skills/
 **对外接口**：`static String installFromUrl(CancelToken ctx, String source, Catalog catalog, Path workDir) throws IOException`
 
 流程：
 1. 通过 `java.net.http.HttpClient`（`newHttpClient()`，`Duration.ofSeconds(60)`）下载 source 到临时文件（大小限制 50 MB，超出关闭 stream）
 2. 用 `java.util.zip.ZipInputStream` / `ZipFile` 打开
 3. 严格校验：所有路径必须以 `<topDir>/` 起头、`<topDir>` 满足 F3 命名、内部不含 `..`、不含绝对路径、不含符号链接（zip 条目通常不含符号链接位，但若 entry 的 unix-attr 标识为 symlink 则拒绝）
-4. 解压到 `~/.mewcode/skills/<topDir>/`
+4. 解压到 `~/.cortex/skills/<topDir>/`
 5. 调用 `catalog.reload(workDir)` 触发热重载
 6. 返回 `<topDir>` 作为 skillName
 
-### com.mewcode.tool.LoadSkillTool
+### com.cortex.tool.LoadSkillTool
 **职责**：LoadSkill 工具实现
 **对外接口**：实现 `Tool` 接口
 
@@ -217,7 +217,7 @@ public final class LoadSkillTool implements Tool {
 4. `active.activate(name, body)`
 6. 返回 `Skill <name> activated. SOP pinned to env context.`
 
-### com.mewcode.tool.InstallSkillTool
+### com.cortex.tool.InstallSkillTool
 **职责**：InstallSkill 工具实现
 **对外接口**：实现 `Tool`
 
@@ -230,7 +230,7 @@ public final class InstallSkillTool implements Tool {
 
 `readOnly() { return false; }`（写盘 + 网络），`isSystem() { return false; }`。`execute` 直接调 `Install.installFromUrl`，返回成功消息或错误。
 
-### com.mewcode.tool.ToolRegistry
+### com.cortex.tool.ToolRegistry
 **修改**：
 - `Tool` 接口新增 `default boolean isSystem() { return false; }` 方法；现有 6 个工具与 MCP 工具沿用默认实现
 - `LoadSkillTool.isSystem()` 返回 true
@@ -239,13 +239,13 @@ public final class InstallSkillTool implements Tool {
 
 注：本期不在主 agent loop 里用 `definitionsFiltered` 改主对话工具集——按 spec F27 决议，inline 模式不真过滤。但 fork 模式子 Agent 用该方法构造工具集。
 
-### com.mewcode.prompt.Modules
+### com.cortex.prompt.Modules
 **修改**：
 - `optionalModules(String instructions, String memory)` 改为 `optionalModules(String instructions, String memory, String skillsCatalog)`
 - 原 priority 90 槽位由 `"active-skills"` 重命名为 `"skills-catalog"`，内容由调用方传入
 - 增加常量 `PRIO_SKILLS_CATALOG = 90`，删除 `PRIO_ACTIVE_SKILLS`
 
-### com.mewcode.prompt.Prompt
+### com.cortex.prompt.Prompt
 **修改**：
 - `buildSystemPrompt(String instructions, String memory)` 改为 `buildSystemPrompt(String instructions, String memory, String skillsCatalog)`
 - 增加 `static String renderActiveSkillsBlock(List<ActiveSkillEntry> entries)`，输出形如：
@@ -271,13 +271,13 @@ public record ActiveSkillEntry(String name, String body) {}
 
 `skills.Catalog` 和 `skills.ActiveSkills` 提供两个适配方法 `toPromptItems()` / `toPromptEntries()` 把内部类型转换到 prompt 包的类型上。
 
-### com.mewcode.agent.SessionRuntime
+### com.cortex.agent.SessionRuntime
 **修改**：
 - `SessionRuntime` 新增字段 `ActiveSkills activeSkills`
 - 构造函数初始化空 `new ActiveSkills()`
 - `resetForNewSession` 同时 `this.activeSkills.clear()`
 
-### com.mewcode.agent.Agent
+### com.cortex.agent.Agent
 **修改**：
 - 新增 `Builder.catalog(Catalog c)`：注入 catalog 引用（用于第一阶段列表与 clearActiveSkills 入口）
 - 新增 `Agent.activateSkill(name, body)` / `clearActiveSkills()` 方法，转发到 `runtime.activeSkills`
@@ -292,7 +292,7 @@ public record ActiveSkillEntry(String name, String body) {}
   ```
   （`catalog` 为 null 时跳过；进度提示放在 sub-tasks）
 
-### com.mewcode.command.Registry + Skills (新建)
+### com.cortex.command.Registry + Skills (新建)
 **职责**：把 Catalog 注册为 KindPrompt 命令；新增 /skill 命令；UI 接口扩展
 **对外接口**：
 - `registerSkillsAsCommands(Registry reg, Catalog catalog, Executor exec)`
@@ -305,7 +305,7 @@ public record ActiveSkillEntry(String name, String body) {}
 
 为了支持 reload 时清理旧命令，`ToolRegistry` 新增 `removeIf(Predicate<Command>)` 或 `removeSkillCommands()` 入口。
 
-### com.mewcode.command.UI
+### com.cortex.command.UI
 **修改**：
 - UI 接口新增方法：
   - `List<SkillSummary> listCatalogSkills()`（每条含 name/description/source/mode）
@@ -314,18 +314,18 @@ public record ActiveSkillEntry(String name, String body) {}
   - `void appendAssistantMessage(String text)`（fork 路径用，把子 Agent 的 finalText 写入主对话历史）
 - `NopUI` 提供零值实现
 
-### com.mewcode.command.Builtins
+### com.cortex.command.Builtins
 **修改**：
 - 修改 `handleClear`：在调 `ui.clearAndNewSession()` 后追加 `ui.clearActiveSkills()`
 - 新增 `name = "skill"`、kind = KindLocal、handler = `handleSkill` 的注册块
 
-### com.mewcode.tui.*
+### com.cortex.tui.*
 **修改**：
 - Model 持有 `Catalog`、`Executor` 字段
 - 实现新增的 UI 方法：`listCatalogSkills` / `listActiveSkills` / `clearActiveSkills` / `appendAssistantMessage`
-- `MewCodeModel` 的 builder 接受新参数并接入
+- `CortexModel` 的 builder 接受新参数并接入
 
-### com.mewcode.MewCode
+### com.cortex.Cortex
 **修改**：
 - 启动时构造 `Catalog`、`ActiveSkills` 并注入到 `SessionRuntime`
 - 注册 `LoadSkillTool` / `InstallSkillTool` 内置工具
@@ -338,7 +338,7 @@ public record ActiveSkillEntry(String name, String body) {}
 ### 启动期
 
 ```
-MewCode.main:
+Cortex.main:
   ├─ ToolToolRegistry.createDefault()
   ├─ Mcp.attachServers(registry)              // 已有
   ├─ Catalog.load(workDir)                    // 两层路径扫描
@@ -350,7 +350,7 @@ MewCode.main:
   ├─ Commands.registerBuiltins(cmdReg)        // ch10 内置命令
   ├─ Commands.registerSkillsAsCommands(cmdReg, catalog, executor)
   ├─ Commands.registerSkillCmd(cmdReg)        // /skill (新)
-  └─ new MewCodeModel(.catalog(catalog).executor(executor)...build().run()
+  └─ new CortexModel(.catalog(catalog).executor(executor)...build().run()
 ```
 
 ### Skill 显式调用（如 /my-skill）
@@ -419,9 +419,9 @@ executor.execute (fork) →
 ## 文件组织
 
 ```
-mewcode/
-├── src/main/java/com/mewcode/
-│   ├── MewCode.java                       # 接线：构造 catalog / executor / 注册工具与命令
+cortex/
+├── src/main/java/com/cortex/
+│   ├── Cortex.java                       # 接线：构造 catalog / executor / 注册工具与命令
 │   ├── skills/                         # 新包
 │   │   ├── SkillMeta.java              # record
 │   │   ├── SkillSource.java            # enum USER / PROJECT
@@ -452,9 +452,9 @@ mewcode/
 │   │   ├── SessionRuntime.java         # 修改：activeSkills 字段
 │   │   └── Agent.java                  # 修改：catalog 选项 / run 内构造 sys 与 env 拼接
 │   └── tui/
-│       ├── MewCodeModel.java                 # 修改：持有 catalog/executor + 实现新 UI 方法
+│       ├── CortexModel.java                 # 修改：持有 catalog/executor + 实现新 UI 方法
 │       └── ...
-├── src/test/java/dev/mewcode/
+├── src/test/java/dev/cortex/
 │   ├── skills/SkillParserTest.java
 │   ├── skills/CatalogTest.java
 │   ├── skills/InstallTest.java

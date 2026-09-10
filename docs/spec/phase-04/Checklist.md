@@ -5,7 +5,7 @@
 > 验证记录（2026-09-08，feature/phase04）：单测 PromptTest/EnvironmentTest/ReminderTest/AnthropicSystemTest/AgentTest 全绿；
 > tmux 端到端用 `.cortex/config.yaml` 的 openai 兼容端点（deepseek）跑场景 2–6，场景 1 以 SmokeMain 在
 > openai 兼容端点验证（`cache_read=1280`，次轮命中）；anthropic 腿因无 key 未验证。
-> 文档中的 `MewCode` / `Provider` / `mvn` / `llm.System` 等命名按实际代码适配（`Cortex` / `LlmClient` / Gradle / `llm.SystemPrompt`）。
+> 文档中的 `Cortex` / `Provider` / `mvn` / `llm.System` 等命名按实际代码适配（`Cortex` / `LlmClient` / Gradle / `llm.SystemPrompt`）。
 
 ## 实现完整性
 

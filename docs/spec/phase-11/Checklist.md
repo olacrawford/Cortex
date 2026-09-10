@@ -12,7 +12,7 @@
 
 ### Hook 包
 
-- [x] `com.mewcode.hook` 包存在且编译通过(验证：`./gradlew -q -DskipTests compile`)
+- [x] `com.cortex.hook` 包存在且编译通过(验证：`./gradlew -q -DskipTests compile`)
 - [x] 11 个 `Event` 枚举值全部声明且 `isBlocking()` 仅对 PRE_TOOL_USE / USER_PROMPT_SUBMIT 返回 true(验证：`./gradlew test -Dtest=EventTest` 或单测覆盖)
 - [x] `HookLoader` 能解析合法 YAML 并构造 HookEngine(验证：`HookLoaderTest` 全部通过)
 - [x] `HookLoader` 对字段缺失 / 枚举错 / async+拦截事件冲突 / matcher 编译失败均报 stderr 并跳过该条(验证：对应 `HookLoaderTest` 子用例通过)
@@ -26,18 +26,18 @@
 ### agent / tui 集成
 
 - [x] `Agent.Builder.hookEngine` 方法存在,agent 内部 `dispatchHook` 在 11 个 emit 点全部调用(验证：`AgentTest.testHookEmit*` 覆盖每个事件)
-- [x] tui `submit()` 在 UserPromptSubmit 拦截时不消费 textBox、显示 errorBlock(验证：`MewCodeModelTest.testSubmitBlocked` 通过)
-- [x] `MewCodeModel.init()` 末尾调 `dispatchSessionStart`(验证：`MewCodeModelTest.testInitDispatchSessionStart` 或集成测试)
-- [x] `/clear` / `/resume` / `/exit` 触发 SessionEnd(验证：`MewCodeModelTest.testClearDispatchSessionEnd` 等)
-- [x] `MewCode` 退出前兜底 SessionEnd(验证：`MewCode` 调用链审查)
+- [x] tui `submit()` 在 UserPromptSubmit 拦截时不消费 textBox、显示 errorBlock(验证：`CortexModelTest.testSubmitBlocked` 通过)
+- [x] `CortexModel.init()` 末尾调 `dispatchSessionStart`(验证：`CortexModelTest.testInitDispatchSessionStart` 或集成测试)
+- [x] `/clear` / `/resume` / `/exit` 触发 SessionEnd(验证：`CortexModelTest.testClearDispatchSessionEnd` 等)
+- [x] `Cortex` 退出前兜底 SessionEnd(验证：`Cortex` 调用链审查)
 - [x] `/hooks` 命令注册到命令表(验证：`BuiltinCommandsTest` 中 `/hooks` 命令存在 + 输出格式正确)
 - [x] `pendingReminders` 在 `Agent.run` `takeReminders` 后被清空(验证：`SessionRuntimeTest.testTakeReminders` 通过)
 
 ## 集成
 
 - [x] `HookEngine` 与 `permission.Matcher` 共用同一套匹配实现(验证：hook 包不重复实现 exact/regex/glob)
-- [x] `HookEngine` 接入 `Agent.run` 后所有现有 agent 测试不破坏(验证：`./gradlew test -Dtest='com.mewcode.agent.*Test'` 全过)
-- [x] `HookEngine` 接入 tui 后所有现有 tui 测试不破坏(验证：`./gradlew test -Dtest='com.mewcode.tui.*Test'` 全过)
+- [x] `HookEngine` 接入 `Agent.run` 后所有现有 agent 测试不破坏(验证：`./gradlew test -Dtest='com.cortex.agent.*Test'` 全过)
+- [x] `HookEngine` 接入 tui 后所有现有 tui 测试不破坏(验证：`./gradlew test -Dtest='com.cortex.tui.*Test'` 全过)
 - [x] PreToolUse 拦截结果当 tool_result 回灌后,LLM 视角看到的是 `isError=true` 的 ToolResult,content 含 `[hook <name>] <reason>`(验证：`AgentTest` 检查 results map 字段)
 - [x] reminder 注入路径与 plan reminder 协同——同一轮 LLM 请求的 reminder 串同时含两类(验证：`AgentTest` 中构造 plan 模式 + hook prompt 注入,断言 reminder 串包含两段)
 
@@ -49,11 +49,11 @@
 
 ## 端到端场景(tmux 实跑)
 
-每个场景在 tmux 内启动一个 mewcode 实例完成,验证人工/可视化行为。
+每个场景在 tmux 内启动一个 cortex 实例完成,验证人工/可视化行为。
 
 ### 场景 1:PreToolUse shell 拦截 write_file
 
-**预置:** 在 `.mewcode/hooks.yaml` 写一条 hook:
+**预置:** 在 `.cortex/hooks.yaml` 写一条 hook:
 ```yaml
 hooks:
   - name: block-write
@@ -68,7 +68,7 @@ hooks:
 ```
 
 **步骤:**
-- [x] tmux 启动 mewcode（`java -jar build/libs/mewcode.jar`）
+- [x] tmux 启动 cortex（`java -jar build/libs/cortex.jar`）
 - [x] 给 LLM 输入"创建一个文件 hello.txt 内容是 hi"
 - [x] LLM 应触发 write_file,工具被拦截
 - [x] scrollback 内 tool_result 显示 `[hook block-write] blocked by hook`、文件未创建
@@ -87,7 +87,7 @@ hooks:
 ```
 
 **步骤:**
-- [x] tmux 重启 mewcode
+- [x] tmux 重启 cortex
 - [x] 立刻发一句英文输入"hi there"
 - [x] LLM 应该用中文回复(因为 reminder 区注入了 zh-CN 指令)
 
@@ -114,7 +114,7 @@ hooks:
 ```
 
 **步骤:**
-- [x] tmux 启动 mewcode
+- [x] tmux 启动 cortex
 - [x] 让 LLM 写一个故意排版不整齐的 Java 文件(如缩进错乱)
 - [x] LLM 完成写入后主对话立即进入下一轮,不停顿
 - [x] 验证文件被 spotless 格式化(可手动 `cat` 该文件)
@@ -136,7 +136,7 @@ hooks:
 ```
 
 **步骤:**
-- [x] tmux 启动 mewcode
+- [x] tmux 启动 cortex
 - [x] 输入"请帮我 delete 那个文件"
 - [x] 输入被拦截,scrollback 内显示 `[hook warn-delete] 用户消息含 delete 关键字`
 - [x] 输入框内容仍在(被退回用户重新编辑)
@@ -157,7 +157,7 @@ hooks:
 ```
 
 **步骤:**
-- [x] tmux 启动 mewcode
+- [x] tmux 启动 cortex
 - [x] 让 LLM 简单回答一个问题后停止
 - [x] echo server 收到一次 POST,body 含 `"event":"Stop"`
 
@@ -175,7 +175,7 @@ hooks:
 ```
 
 **步骤:**
-- [x] tmux 启动 mewcode
+- [x] tmux 启动 cortex
 - [x] 第一轮发任意消息,stderr 出现 `first-turn-fired`
 - [x] 第二轮发消息,stderr 没有再次出现
 - [x] 执行 `/clear` 进新会话,再发消息,stderr 重新出现 `first-turn-fired`
@@ -199,9 +199,9 @@ hooks:
 ```
 
 **步骤:**
-- [x] tmux 启动 mewcode
-- [x] mewcode 启动期 stderr 打印 `hook "bad-async": async not allowed for blocking events, skipped`
-- [x] mewcode 仍然成功进入 idle 状态
+- [x] tmux 启动 cortex
+- [x] cortex 启动期 stderr 打印 `hook "bad-async": async not allowed for blocking events, skipped`
+- [x] cortex 仍然成功进入 idle 状态
 - [x] `/hooks` 命令仅列出 good-hook、未列 bad-async
 
 ### 场景 8:/hooks 命令
@@ -209,7 +209,7 @@ hooks:
 **预置:** 一份包含 3 条合法 hook 的 hooks.yaml(任意 event 组合)
 
 **步骤:**
-- [x] tmux 启动 mewcode
+- [x] tmux 启动 cortex
 - [x] 输入 `/hooks` 回车
 - [x] 输出按 event 分组,每条一行 `  <name>  <event>  <action.type>  [flags]`
 - [x] 末尾显示 `Loaded from: .../hooks.yaml`
@@ -219,7 +219,7 @@ hooks:
 **预置:** hooks.yaml 包含场景 1、2、3、4 全部 hook
 
 **步骤:**
-- [x] tmux 启动 mewcode
+- [x] tmux 启动 cortex
 - [x] 首轮:SessionStart 注入 zh-CN(场景 2),Agent 准备就绪
 - [x] 输入"帮我创建 hello.java,然后用 spotless 格式化一下"
 - [x] LLM 调 write_file 创建文件 → 被场景 1 的 hook 拦截 → LLM 重试(可能换 edit_file)或换 bash 调 spotless

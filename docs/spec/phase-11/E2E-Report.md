@@ -90,7 +90,7 @@ after-write（async=true）在 write_file 结果产出后触发，`/tmp/async-ho
 
 ## 实现映射说明（相对 checklist 的差异）
 
-- 包/路径映射：`com.mewcode.*` → `com.cortex.*`；hooks.yaml 位于 `.cortex/hooks.yaml`（项目级）与 `~/.cortex/hooks.yaml`（用户级）；同名 hook 项目级先加载、用户级视为后到者跳过（F7）。
-- Checklist 引用的参考实现行号（MewCodeModel.java:494 等）不适用；接入点为：`Cortex.main`（HookLoader.load + 退出兜底 SessionEnd）、`CortexModel`（submit 拦截 / 会话事件 / hookLines）、`Agent`（PreUserMessage/PreToolUse/PostToolUse/Pre/PostCompact/Stop/Notification emit 点）、`SessionRuntime`（pendingReminders + once 状态经 engine.resetForNewSession）。
+- 包/路径映射：`com.cortex.*` → `com.cortex.*`；hooks.yaml 位于 `.cortex/hooks.yaml`（项目级）与 `~/.cortex/hooks.yaml`（用户级）；同名 hook 项目级先加载、用户级视为后到者跳过（F7）。
+- Checklist 引用的参考实现行号（CortexModel.java:494 等）不适用；接入点为：`Cortex.main`（HookLoader.load + 退出兜底 SessionEnd）、`CortexModel`（submit 拦截 / 会话事件 / hookLines）、`Agent`（PreUserMessage/PreToolUse/PostToolUse/Pre/PostCompact/Stop/Notification emit 点）、`SessionRuntime`（pendingReminders + once 状态经 engine.resetForNewSession）。
 - `AgentTest` 未新增 fake-provider 级 hook 单测（fake provider 与现有 AgentTest 结构不匹配）；PreToolUse 拦截与 reminder 注入路径分别由 tmux E2E（场景 1/2）与 SlashDispatchTest/SessionRuntimeTest 覆盖。
 - 权限规则向后兼容：仅含 `Bash(git *)` 形式的既有配置全部通过既有测试（RuleTest/PermissionEngineTest/SettingsTest）。

@@ -2,7 +2,7 @@
 
 ch13 SubAgent 把任务从单 Agent 委派给子 Agent,实现了消息、权限账本、文件读缓存与 token 计数的隔离;ch14 Worktree 给每个子 Agent 配上独立工作目录,文件系统层并发也安全。但这两章合起来仍是「星型」拓扑——所有子 Agent 只能与主 Agent 通信,子 Agent 之间没有横向通道;主 Agent 既要决策、又要中转,既是大脑也是邮局。对「同时重构四个模块」「三个角度查同一个 bug」这类持续性、需要互相交流的工作,星型结构的瓶颈很明显。
 
-本章把 mewcode 从星型升级到「网状」:
+本章把 cortex 从星型升级到「网状」:
 
 - 主 Agent 创建 **Team** 后升任 **Lead**,Team 是一个长期存在的小组对象,记名称、负责人、成员花名册、持久化位置
 - 每个 **队员**(Teammate)是一个独立的 Agent 实例,有自己的 Conversation、自己的 Worktree
@@ -12,19 +12,19 @@ ch13 SubAgent 把任务从单 Agent 委派给子 Agent,实现了消息、权限�
 - Lead 可选启用 **Coordinator Mode**(独立于 Team,但典型场景一起用),双锁机制下剥夺 Write/Edit 工具,只保留调度、读类操作与 shell(用于 git merge)
 - 收敛阶段由 Lead 用 Bash 跑 `git merge` 逐个合各队员的 worktree 分支,冲突由 LLM 推理解决,搞不定就 `git merge --abort` 保留 worktree 上报用户
 
-mewcode 现有相关基础设施:
+cortex 现有相关基础设施:
 - ch13 `task.Manager` 已支持后台任务管理 + `sendMessage` 续派 + `AgentNameRegistry` (`byName` 字段已是 name → id 映射);本章扩展为多 Team 寻址
 - ch13 `agent.AgentTool.execute` 已是子 Agent 启动入口,本章新增 `teamName` 参数走 Team spawn 分支
 - ch13 工具过滤 `tool.applyAgentToolFilter` 已支持多层防线;本章新增 Team 专属白名单(协作工具)与 Coordinator Mode 白名单
-- ch14 `worktree.Manager` 已支持嵌套 slug(`team/alice` → `.mewcode/worktrees/team+alice/`),本章直接复用做队员 worktree(slug 形式 `team-<teamName>/<member>`)
-- ch12 session 持久化(`.mewcode/sessions/<id>/conversation.jsonl`)按对话粒度落盘;本章给每个队员单独申请一个 session,队员 stop 不删 session,SendMessage 续派时通过 session 反序列化 Conversation
-- ch10 `dev.mewcode.command` slash 命令系统,本章新增 `/team` 系列
+- ch14 `worktree.Manager` 已支持嵌套 slug(`team/alice` → `.cortex/worktrees/team+alice/`),本章直接复用做队员 worktree(slug 形式 `team-<teamName>/<member>`)
+- ch12 session 持久化(`.cortex/sessions/<id>/conversation.jsonl`)按对话粒度落盘;本章给每个队员单独申请一个 session,队员 stop 不删 session,SendMessage 续派时通过 session 反序列化 Conversation
+- ch10 `dev.cortex.command` slash 命令系统,本章新增 `/team` 系列
 - ch07 `permission` 已支持 `plan` 模式,本章给 `planModeRequired` 队员的 Plan 提交-Lead 审批工作流套用同一引擎
 
 本章**只做**到「Lead 多人协作 + Plan 审批 + Coordinator 收敛」。跨进程跨机器分布式团队、队员之间实时流式通信、复杂任务依赖约束(优先级 / deadline)、Windows 平台 iTerm2 适配均不在范围内。
 
-## 目标- **G1**: 提供 `Team` 与 `TeamManager`——Team 封装小组生命周期(name、leadAgentId、members、configPath);Manager 在单 mewcode 进程内管理多个 Team(典型场景同时只有一个活跃 Team)
-- **G2**: 提供 `TeamCreate` 工具——主 Agent 调用即创建 Team、调 `detectBackend` 确定后端、写 `~/.mewcode/teams/<sanitizedName>/config.json`、把 Lead 注册成第一个成员;同名团队自动后缀 `-2` / `-3` 避免冲突
+## 目标- **G1**: 提供 `Team` 与 `TeamManager`——Team 封装小组生命周期(name、leadAgentId、members、configPath);Manager 在单 cortex 进程内管理多个 Team(典型场景同时只有一个活跃 Team)
+- **G2**: 提供 `TeamCreate` 工具——主 Agent 调用即创建 Team、调 `detectBackend` 确定后端、写 `~/.cortex/teams/<sanitizedName>/config.json`、把 Lead 注册成第一个成员;同名团队自动后缀 `-2` / `-3` 避免冲突
 - **G3**: 扩展 `Agent` 工具——增加 `teamName` 可选参数,非空时走 Team spawn 分支:加载定义 → 创建队员 Worktree → 注入协作工具 → 按后端分流 spawn → 注册到 `AgentNameRegistry` → 写入 `team.members`
 - **G4**: 提供 `TeamDelete` 工具——确认所有成员 `isActive=false` 后,删队员 worktree + 删 team 目录,Lead 退出团队;有活跃成员时拒绝删除
 - **G5**: 三种执行后端 `tmux` / `iterm2` / `in-process`,统一抽象 `Backend` 接口;`detectBackend` 按 `$TMUX → $TERM_PROGRAM=iTerm.app && which it2 → which tmux → in-process` 优先级一次性决定,不做运行时回退
@@ -42,10 +42,10 @@ mewcode 现有相关基础设施:
 - **G17**: 提供 TUI slash 命令 `/team list` / `/team info <name>` / `/team delete <name>` / `/team kill <member>`,辅助用户人工介入
 - **G18**: 与 ch04~ch14 既有功能协同——主 Agent 平时(未 TeamCreate)看到的工具列表不变;协作工具仅在 Team 上下文出现;ch13 后台任务 / AdoptRunning / SendMessage 续派路径保留,Team 队员的续派复用同一套底层 `TaskManager`
 
-## 功能需求### Team 数据结构与 Manager- **F1**: `Team` 字段——`name`(原始名)、`sanitizedName`(经 `sanitize` 处理后用于路径)、`leadAgentId`、`members List<TeammateInfo>`、`configDir`(`<homeDir>/.mewcode/teams/<sanitizedName>/`)、`configPath`(`<configDir>/config.json`)、`createdAt Instant`、`backend BackendType`
+## 功能需求### Team 数据结构与 Manager- **F1**: `Team` 字段——`name`(原始名)、`sanitizedName`(经 `sanitize` 处理后用于路径)、`leadAgentId`、`members List<TeammateInfo>`、`configDir`(`<homeDir>/.cortex/teams/<sanitizedName>/`)、`configPath`(`<configDir>/config.json`)、`createdAt Instant`、`backend BackendType`
 - **F2**: `TeammateInfo` 字段——`name`(Lead 分配的队员名,Team 内唯一)、`agentId`(对应 `BackgroundTask.id`)、`agentType`(使用的 subagent 定义名;Fork 路径下为 `""`)、`model`(覆盖,空表 inherit)、`worktreePath`(绝对路径)、`branch`(对应 worktree 分支名)、`backendType`(可 per-member 不同)、`paneId`(tmux pane / iterm2 split id,in-process 为空)、`isActive Boolean`(`null` 或 `true` 表活跃,`false` 表空闲;终止后直接从 `members` 移除)、`planModeRequired boolean`、`sessionDir`(队员独立 session 目录绝对路径)
 - **F3**: `TeamManager` 字段——`lock ReentrantLock`、`teams Map<String,Team>`(按 `sanitizedName` 索引)、`homeDir`(`System.getProperty("user.home")`)、`worktreeManager`、`taskManager`、`registry AgentNameRegistry`
-- **F4**: `TeamManager(Path homeDir, WorktreeManager wt, TaskManager taskMgr, AgentNameRegistry reg)`——校验 `<homeDir>/.mewcode/teams/` 可写;扫描该目录还原 `teams` map(每个子目录读一次 `config.json`,跳过解析失败的并 stderr 警告)
+- **F4**: `TeamManager(Path homeDir, WorktreeManager wt, TaskManager taskMgr, AgentNameRegistry reg)`——校验 `<homeDir>/.cortex/teams/` 可写;扫描该目录还原 `teams` map(每个子目录读一次 `config.json`,跳过解析失败的并 stderr 警告)
 - **F5**: `TeamManager.create(name, agentType)`——
   1. `sanitized = sanitize(name)`(只保留 `[a-zA-Z0-9._-]`,其他替换为 `-`,首尾去 `-`,空字符串拒绝)
   2. 同名冲突时在 `sanitized` 后追加 `-2` / `-3` 直到唯一
@@ -92,7 +92,7 @@ mewcode 现有相关基础设施:
   4. 否则 → `IN_PROCESS`
 
 ### tmux 后端- **F15**: `TmuxBackend` 实现 `Backend` 接口
-  - `spawn`:`tmux split-window -h -P -F "#{pane_id}" -- <cmd>`(横向 split,-P 打印 pane id,-F 指定格式);`cmd` 为 `mewcode --team-member --team <teamName> --member <memberName> --agent-id <agentId> --session-dir <sessionDir> --worktree <worktreePath> [--agent-type <type>] [--model <model>] [--plan-mode]`
+  - `spawn`:`tmux split-window -h -P -F "#{pane_id}" -- <cmd>`(横向 split,-P 打印 pane id,-F 指定格式);`cmd` 为 `cortex --team-member --team <teamName> --member <memberName> --agent-id <agentId> --session-dir <sessionDir> --worktree <worktreePath> [--agent-type <type>] [--model <model>] [--plan-mode]`
   - `--agent-id` 是关键:Lead spawn 时已生成的 agentId 直接传给子进程,子进程不需要读 Lead 还没写完的 `config.json` 找自己
   - `wake`:`tmux send-keys -t <paneId> "" Enter`(回车触发子进程 stdin scanner 读到一行,立刻去 mailbox 轮询;in-process 后端无此动作)
   - `kill`:`tmux kill-pane -t <paneId>`(忽略 pane 不存在错误)
@@ -109,7 +109,7 @@ mewcode 现有相关基础设施:
   - `kill`:调 `TaskManager.stop(agentId)`
 - **F19**: in-process 后端的队员**只允许同步子 Agent**——其 `Agent` 工具看不到 `teamName` 参数(`teamName` 被拦截);后台子 Agent 也禁用(过滤 `runInBackground=true`)
 
-### Pane 后端子进程的 team-member 模式- **F19a**: `mewcode --team-member` 在 Pane 后端被 spawn 的 mewcode 子进程**不启动 TUI**,而是跑一个自治循环(`dev.mewcode.cli.TeamMemberRunner` 的 `run` 方法):
+### Pane 后端子进程的 team-member 模式- **F19a**: `cortex --team-member` 在 Pane 后端被 spawn 的 cortex 子进程**不启动 TUI**,而是跑一个自治循环(`dev.cortex.cli.TeamMemberRunner` 的 `run` 方法):
   1. 从 CLI 解析 `--team / --member / --agent-id / --session-dir / --worktree / --agent-type / --model / --plan-mode`(用 picocli 或 Apache Commons CLI 解析,本项目选 picocli `info.picocli:picocli`)
   2. `System.setProperty("user.dir", workTree)` + `Path.of(workTree).toAbsolutePath()` 作为后续所有 IO 的根;让该进程的 `Path.of("").toAbsolutePath()` 与权限沙箱根都指到 worktree
   3. 构造**单独的** `TeamManager`、provider、registry、permission engine、hook engine(完整复用 Lead wire 代码,但不构造 TUI)
@@ -245,7 +245,7 @@ mewcode 现有相关基础设施:
   ```
 
 ### 邮箱读取与消息注入- **F41**: 子 Agent 的 Loop 在每轮请求 LLM **之前**先调 `Mailbox.read(agentId)`;若有未读消息,构造 `<incoming-messages>` system reminder 追加到本轮请求的 systemReminders,然后调 `markRead`
-- **F41a**: Lead 侧不通过 ctx hook 自动读 mailbox(Lead 没有 `TeammateContext`),而是由 TUI 在初始化时启动后台 virtual thread `consumeLeadMail`(实现于 `dev.mewcode.tui.LeadMailWatcher`):
+- **F41a**: Lead 侧不通过 ctx hook 自动读 mailbox(Lead 没有 `TeammateContext`),而是由 TUI 在初始化时启动后台 virtual thread `consumeLeadMail`(实现于 `dev.cortex.tui.LeadMailWatcher`):
   - 每秒调 `TeamManager.pollLeadMailboxes()`,遍历所有 Team 的 `<configDir>/mailbox/lead.json` 读未读消息,标 read,返回 `List<LeadMessage>`
   - 把这批消息渲染成 `<team-update>` reminder(与 `<incoming-messages>` 不同,Lead 视角语义更清晰;消息内容截断上限 8000 字符,允许队员的完整报告完整透传),调 `runtime.appendReminders(...)` 推到 `pendingReminders`
   - **同时**往 `leadMailQueue`(`LinkedBlockingQueue` capacity=1)`offer` 一个信号(非阻塞,buffer=1 合并掉重复)
@@ -276,7 +276,7 @@ mewcode 现有相关基础设施:
   2. 调 `TaskManager.sendMessage(parentCtx, name, message)` 复用 ch13 已有续派接口
   3. `TaskManager.sendMessage` 重置 `status=RUNNING`,起新 virtual thread 跑 `runToCompletion(newMessage)`
   4. 续派前调 `Team.setMemberActive(memberName, true)`
-- **F47**: Pane 后端队员的续写——SendMessage 写邮箱后,目标 pane 内的 mewcode 实例下一轮 Loop 自然读到消息;若 pane 已死(`tmux list-panes` 查不到 `paneId`),报错让 Lead 决定是否重新 spawn
+- **F47**: Pane 后端队员的续写——SendMessage 写邮箱后,目标 pane 内的 cortex 实例下一轮 Loop 自然读到消息;若 pane 已死(`tmux list-panes` 查不到 `paneId`),报错让 Lead 决定是否重新 spawn
 
 ### Plan 审批工作流- **F48**: `Agent` 工具 spawn 队员时,若 `planModeRequired=true`(来自 SubAgentDefinition 的新字段或 spawn 参数),把子 Agent 的初始 `Permission.Mode` 设为 `PLAN`
 - **F49**: 队员在 plan 模式下生成 Plan 后(通过常规 LLM 推理),用 `SendMessage(to="lead", type="text", summary="plan ready", content="<plan text>")` 发给 Lead——本期不强制结构化 Plan 类型(Lead 自行识别)
@@ -294,7 +294,7 @@ mewcode 现有相关基础设施:
       return envTruthy(System.getenv("MEWCODE_COORDINATOR_MODE"));
   }
   ```
-  `Feature.has` 通过 `dev.mewcode.config` 读 `features.coordinatorMode` 字段;`envTruthy` 接受 `"1"` / `"true"` / `"yes"`(大小写不敏感)
+  `Feature.has` 通过 `dev.cortex.config` 读 `features.coordinatorMode` 字段;`envTruthy` 接受 `"1"` / `"true"` / `"yes"`(大小写不敏感)
 - **F53**: Coordinator Mode 允许工具白名单常量:
   ```java
   public static final List<String> ALLOWED_TOOLS = List.of(
@@ -308,7 +308,7 @@ mewcode 现有相关基础设施:
   1. 把 Lead 的 allowed tools 设为 `Coordinator.ALLOWED_TOOLS`(调 `Agent.setAllowedTools` 已有接口)
   2. 在 systemPrompt 后追加 coordinator 提示词(F55)
   3. TUI 状态栏显示 `[COORDINATOR]` 模式标签
-- **F55**: Coordinator 系统提示词追加在 systemPrompt 末尾,核心是「四阶段 + 派完不许自己干」纪律。最终文案见 [src/main/java/dev/mewcode/coordinator/Coordinator.java:SYSTEM_PROMPT_SUFFIX](../../src/main/java/dev/mewcode/coordinator/Coordinator.java),关键约束:
+- **F55**: Coordinator 系统提示词追加在 systemPrompt 末尾,核心是「四阶段 + 派完不许自己干」纪律。最终文案见 [src/main/java/dev/cortex/coordinator/Coordinator.java:SYSTEM_PROMPT_SUFFIX](../../src/main/java/dev/cortex/coordinator/Coordinator.java),关键约束:
   - **派完队员就停手等汇报**:派出 Agent / SendMessage 后**禁止**立刻调 read_file / glob / grep / bash 自己探索;**禁止**用 sleep / TaskList 轮询凑时间。`TaskManager` 完成时自然推送 `<task-notification>` reminder,Lead 下一轮被唤醒后再继续
   - 唯一该做的事:发一行总结「已派 N 名队员探索 X,等结果」,让本轮结束
   - 允许自己用 read_file/glob/grep 的场景仅限:Research 第一次目标定位;Synthesis 阶段读**队员产出的报告文件**;Verification 阶段 git diff / git status 等收敛操作
@@ -325,7 +325,7 @@ mewcode 现有相关基础设施:
 - **F61**: `/team delete <name> [--force]`——调 `TeamManager.delete(name, force)`
 - **F62**: `/team kill <member>`——查到 member 所属 Team,调对应 backend.kill,然后 `removeMember`
 
-### 持久化与恢复- **F63**: `~/.mewcode/teams/<sanitizedName>/config.json` 结构:
+### 持久化与恢复- **F63**: `~/.cortex/teams/<sanitizedName>/config.json` 结构:
   ```json
   {
     "name": "...",
@@ -340,23 +340,23 @@ mewcode 现有相关基础设施:
         "agentId": "agent-a1b2c3d",
         "agentType": "worker",
         "model": "",
-        "worktreePath": "/abs/path/.mewcode/worktrees/team-foo+alice",
+        "worktreePath": "/abs/path/.cortex/worktrees/team-foo+alice",
         "branch": "worktree-team-foo+alice",
         "backendType": "tmux",
         "paneId": "%5",
         "isActive": null,
         "planModeRequired": false,
-        "sessionDir": "/abs/path/.mewcode/sessions/<id>"
+        "sessionDir": "/abs/path/.cortex/sessions/<id>"
       }
     ]
   }
   ```
   所有写操作原子(先写 `.tmp` 再 `Files.move(..., ATOMIC_MOVE)`),受 `Team.lock` 保护。**跨进程**(Pane 后端)下,Lead 与子进程是不同进程的不同 Team 内存对象——`addMember` 与 `setMemberActive` 在持锁后**先 `reloadFromDiskLocked` 重读 disk members**再改写+ atomic save(F19c)
-- **F64**: mewcode 启动时(`new TeamManager(...)`)扫描所有 Team 目录:
+- **F64**: cortex 启动时(`new TeamManager(...)`)扫描所有 Team 目录:
   - 解析 `config.json`,失败的目录跳过并 stderr 警告
   - **不**自动恢复 in-process 队员(进程重启后 in-process 队员状态丢失,isActive 视为 false)
   - Pane 队员根据 `paneId` 探测后端是否仍在(`tmux has-session` / `it2 list-panes`),不在的 isActive 标 false
-- **F65**: 队员 session 沿用 ch12 session 持久化机制,路径 `<projectRoot>/.mewcode/sessions/<id>/conversation.jsonl`;Team 删除时一并删除
+- **F65**: 队员 session 沿用 ch12 session 持久化机制,路径 `<projectRoot>/.cortex/sessions/<id>/conversation.jsonl`;Team 删除时一并删除
 - **F66**: `TeamManager.delete(name, force=true)` 步骤(顺序重要):
   1. 持锁,校验 `force` 或全员 isActive=false
   2. 对每个非 lead 成员:用 `BackendFactory.create` 解析其 `backendType` 拿 `Backend` 实例,调 `backend.kill(paneId, agentId)` 杀掉 pane(tmux/iterm2)或 cancel virtual thread(in-process);Pane 子进程检测到 mailbox 目录消失会自行优雅退出兜底
@@ -370,13 +370,13 @@ mewcode 现有相关基础设施:
 - **N4**: 所有 Team 状态变更受 `Team.lock` 保护;Team 之间互不相关,各自一把锁;`TeamManager.lock` 仅保护 `teams` map
 - **N5**: 后端 spawn / kill 调用不持 `Team.lock`(避免长锁);只在更新 `members` 时短暂持锁
 - **N6**: 与 ch04~ch14 既有测试零破坏——`mvn test` 全绿
-- **N7**: 中文友好——错误消息、TUI 输出、coordinator 提示词全部中文(对齐 mewcode 其他模块风格);代码注释中文
-- **N8**: Coordinator Mode 一旦启用,Lead 不可在运行时解锁(避免 LLM 被注入后自行解锁);取消的唯一方式是退出 mewcode 重启
-- **N9**: 权限沙箱(`dev.mewcode.permission.Sandbox`)允许写入项目根**之外**的 `/tmp` 与 macOS 真实路径 `/private/tmp` 作为系统临时目录白名单。理由:工具脚本和队员经常需要 `/tmp` 做中转文件,严格限定在项目根内会导致大量正常用法被沙箱误杀。这一开放对 file-class 工具(read_file / write_file / edit_file)生效;bash 走 exec-class 权限,本来就不受沙箱约束
+- **N7**: 中文友好——错误消息、TUI 输出、coordinator 提示词全部中文(对齐 cortex 其他模块风格);代码注释中文
+- **N8**: Coordinator Mode 一旦启用,Lead 不可在运行时解锁(避免 LLM 被注入后自行解锁);取消的唯一方式是退出 cortex 重启
+- **N9**: 权限沙箱(`dev.cortex.permission.Sandbox`)允许写入项目根**之外**的 `/tmp` 与 macOS 真实路径 `/private/tmp` 作为系统临时目录白名单。理由:工具脚本和队员经常需要 `/tmp` 做中转文件,严格限定在项目根内会导致大量正常用法被沙箱误杀。这一开放对 file-class 工具(read_file / write_file / edit_file)生效;bash 走 exec-class 权限,本来就不受沙箱约束
 
 ## 不做的事
 
-- 跨 mewcode 进程的 Team 共享(同一仓库同一时刻只支持一个 mewcode 实例操作活跃 Team)
+- 跨 cortex 进程的 Team 共享(同一仓库同一时刻只支持一个 cortex 实例操作活跃 Team)
 - 跨机器分布式 Team
 - 队员之间实时流式通信(走 mailbox 文件 + 轮询/Wake,不走 socket)
 - 复杂任务依赖约束(优先级、deadline、SLA)
@@ -388,13 +388,13 @@ mewcode 现有相关基础设施:
 - 跨 Team 寻址(SendMessage 只能在同一 Team 内寻址)
 - 插件来源的 Team 后端
 
-## 验收标准- **AC1**: `new TeamManager(...)` 在 `~/.mewcode/teams/` 不存在时自动创建;已有时正确扫描子目录还原 `teams` map
-- **AC2**: `TeamManager.create("refactor auth", "")` 把 `"refactor auth"` sanitize 为 `"refactor-auth"`,在 `~/.mewcode/teams/refactor-auth/config.json` 落地,`backend` 字段反映 `detectBackend` 结果
+## 验收标准- **AC1**: `new TeamManager(...)` 在 `~/.cortex/teams/` 不存在时自动创建;已有时正确扫描子目录还原 `teams` map
+- **AC2**: `TeamManager.create("refactor auth", "")` 把 `"refactor auth"` sanitize 为 `"refactor-auth"`,在 `~/.cortex/teams/refactor-auth/config.json` 落地,`backend` 字段反映 `detectBackend` 结果
 - **AC3**: 同名 Team 二次 create 自动后缀 `-2`,目录与 sanitizedName 都生效
 - **AC4**: `TeamManager.delete(name, false)` 在有 `isActive != Boolean.FALSE` 成员时抛 `TeamHasActiveMembersException`,目录仍在
 - **AC5**: `TeamManager.delete(name, true)` 删 Worktree、删 session 目录、删 configDir
 - **AC6**: `Backend.detect()` 在 `$TMUX` 设置时返回 `TMUX`;未设但 `$TERM_PROGRAM=="iTerm.app"` 且 `it2` 可执行返回 `ITERM2`;都无但 `tmux` 二进制在 PATH 返回 `TMUX`;否则 `IN_PROCESS`
-- **AC7**: `Agent` 工具带 `teamName="<existing>"` 时,在 `.mewcode/worktrees/team-<sanitized>+<member>/` 落地 Worktree、调对应 `Backend.spawn` 并在 `team.members` 里出现该成员;不带 `teamName` 时维持 ch13 原行为
+- **AC7**: `Agent` 工具带 `teamName="<existing>"` 时,在 `.cortex/worktrees/team-<sanitized>+<member>/` 落地 Worktree、调对应 `Backend.spawn` 并在 `team.members` 里出现该成员;不带 `teamName` 时维持 ch13 原行为
 - **AC8**: in-process 后端队员的 `Agent` 工具调用 `teamName` 参数被拦截,抛 `InProcessTeammateNoSpawnException`
 - **AC9**: 协作工具 `TaskCreate` / `TaskGet` / `TaskList` / `TaskUpdate` / `SendMessage` 在主 Agent 工具列表里**不**可见;在 Team 队员的工具列表里**可见**
 - **AC10**: `TaskCreate` 落 `<teamConfigDir>/tasks.json`,`TaskUpdate(taskId, addBlockedBy=[id])` 正确更新双向 `blockedBy` / `blocks` 关系
@@ -410,23 +410,23 @@ mewcode 现有相关基础设施:
 - **AC20**: Lead 发 `SendMessage(to="planner", type="plan_approval_response", payload={"approve":true})` 后,planner 队员下一轮权限模式切回 `DEFAULT`
 - **AC21**: `Feature.has("COORDINATOR_MODE")=true` 且 `MEWCODE_COORDINATOR_MODE=1` 时,Lead 的 allowed tools 收窄为 `Coordinator.ALLOWED_TOOLS`,`write_file` / `edit_file` 不在其中;TUI 状态栏显示 `[COORDINATOR]`
 - **AC22**: Coordinator Mode 关闭时,Lead 工具列表与 ch13 一致(`write_file` / `edit_file` 可见)
-- **AC23**: tmux 后端 spawn 后,`tmux list-panes` 看到新 pane,pane 内 mewcode 实例启动并连接到该 Team
+- **AC23**: tmux 后端 spawn 后,`tmux list-panes` 看到新 pane,pane 内 cortex 实例启动并连接到该 Team
 - **AC24**: tmux 后端 `wake(paneId)` 通过 `tmux send-keys` 触发目标 pane 输入(集成测试可观察 pane 内容)
 - **AC25**: in-process 后端队员与主 Agent 在同一进程内运行,共享 `TaskManager`,但有独立 `withCwd(worktreePath)`
 - **AC26**: `/team list` slash 命令输出含所有 Team 摘要;`/team info <name>` 输出成员详情;`/team delete <name>` 调 `TeamManager.delete`
 - **AC27**: 项目编译无错误 `mvn -q -DskipTests package`、所有单元测试通过 `mvn test`、`mvn spotbugs:check` 通过
 - **AC28**: tmux 实跑(端到端):
-  - 步骤 1:在 tmux 会话内启动 `mewcode`
-  - 步骤 2:输入 prompt 让主 Agent 调 `TeamCreate(teamName="demo")`,看到状态栏出现 team 标识,`~/.mewcode/teams/demo/config.json` 落地
+  - 步骤 1:在 tmux 会话内启动 `cortex`
+  - 步骤 2:输入 prompt 让主 Agent 调 `TeamCreate(teamName="demo")`,看到状态栏出现 team 标识,`~/.cortex/teams/demo/config.json` 落地
   - 步骤 3:Agent 调 `Agent(teamName="demo", subagentType="general-purpose", name="alice", prompt="在 worktree 里 echo hello > /tmp/test_alice.txt")`
-  - 步骤 4:观察 tmux 新增 pane,pane 内出现 mewcode 子实例;`.mewcode/worktrees/team-demo+alice/` 目录创建;`/tmp/test_alice.txt` 文件创建,内容 `hello`
+  - 步骤 4:观察 tmux 新增 pane,pane 内出现 cortex 子实例;`.cortex/worktrees/team-demo+alice/` 目录创建;`/tmp/test_alice.txt` 文件创建,内容 `hello`
   - 步骤 5:`/team info demo` 显示 alice 成员
   - 步骤 6:Lead 调 `SendMessage(to="alice", summary="ping", message="再写一行 world 到 /tmp/test_alice.txt")`,观察 alice pane 被唤醒(send-keys 触发)、`/tmp/test_alice.txt` 多一行 `world`
   - 步骤 7:`/team delete demo --force`,worktree 和 team 目录清空
 - **AC29**: in-process 后端实跑(端到端,不依赖 tmux):
-  - 步骤 1:`unset TMUX TERM_PROGRAM`,启动 `mewcode`(自动 fallback in-process)
+  - 步骤 1:`unset TMUX TERM_PROGRAM`,启动 `cortex`(自动 fallback in-process)
   - 步骤 2:主 Agent 调 `TeamCreate("inproc")`,创建后端为 `in-process`
   - 步骤 3:`Agent(teamName="inproc", name="bob", prompt="...")` 在同进程 virtual thread 启动 bob
   - 步骤 4:bob 完成后 `Team.config.json` 标记 `isActive=false`、Lead mailbox 收到 idle 消息
   - 步骤 5:Lead 调 `SendMessage(to="bob", message="再做一件事")`,bob 从 sessionDir 恢复对话上下文继续
-- **AC30**: Coordinator Mode 实跑——`MEWCODE_COORDINATOR_MODE=1` 启动 mewcode,主 Agent 的 `write_file` 工具调用被拒绝(`isError=true`);`bash git merge` 调用允许
+- **AC30**: Coordinator Mode 实跑——`MEWCODE_COORDINATOR_MODE=1` 启动 cortex,主 Agent 的 `write_file` 工具调用被拒绝(`isError=true`);`bash git merge` 调用允许

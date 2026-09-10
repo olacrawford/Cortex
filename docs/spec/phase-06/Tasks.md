@@ -5,14 +5,14 @@
 | 操作 | 文件 | 职责 |
 |------|------|------|
 | 改   | `build.gradle.kts` | 添加 `io.modelcontextprotocol.sdk:mcp` 依赖 |
-| 新建 | `src/main/java/com/mewcode/mcp/McpConfig.java` | `McpConfig` / `ServerConfig` record |
-| 新建 | `src/main/java/com/mewcode/mcp/ConfigLoader.java` | `loadConfig`、`loadFile`、`expandVars`、`applyExpansion`、`mergeServers`、`validateServer` |
-| 新建 | `src/test/java/dev/mewcode/mcp/ConfigLoaderTest.java` | 两层合并 / `${VAR}` 展开 / 字段校验 / 降级 单测 |
-| 新建 | `src/main/java/com/mewcode/mcp/McpTool.java` | `CallerSession` 接口、`McpTool`、`AsyncCallerSession`、`adaptTool`、`execute`、非 text 块告警 once 池 |
-| 新建 | `src/test/java/dev/mewcode/mcp/McpToolTest.java` | 命名拼接 / 禁用字符 / `execute` 成功 / 远端 isError / 超时 / 协议错 / 非 text 块跳过 单测 |
-| 新建 | `src/main/java/com/mewcode/mcp/McpManager.java` | `McpManager`、`Session`、`start`(并发 + 30s 超时)、`close`(5s 兜底)、`tools`、`mergeOsEnv`、headers 注入 |
-| 新建 | `src/test/java/dev/mewcode/mcp/McpManagerTest.java` | 连接成功/失败/超时、`close` 不死锁、并发写共享状态安全 单测 |
-| 改   | `src/main/java/com/mewcode/MewCode.java` | 装配 `ConfigLoader.loadConfig`、`McpManager.start`、注册 MCP 工具、`addShutdownHook(mgr::close)` |
+| 新建 | `src/main/java/com/cortex/mcp/McpConfig.java` | `McpConfig` / `ServerConfig` record |
+| 新建 | `src/main/java/com/cortex/mcp/ConfigLoader.java` | `loadConfig`、`loadFile`、`expandVars`、`applyExpansion`、`mergeServers`、`validateServer` |
+| 新建 | `src/test/java/dev/cortex/mcp/ConfigLoaderTest.java` | 两层合并 / `${VAR}` 展开 / 字段校验 / 降级 单测 |
+| 新建 | `src/main/java/com/cortex/mcp/McpTool.java` | `CallerSession` 接口、`McpTool`、`AsyncCallerSession`、`adaptTool`、`execute`、非 text 块告警 once 池 |
+| 新建 | `src/test/java/dev/cortex/mcp/McpToolTest.java` | 命名拼接 / 禁用字符 / `execute` 成功 / 远端 isError / 超时 / 协议错 / 非 text 块跳过 单测 |
+| 新建 | `src/main/java/com/cortex/mcp/McpManager.java` | `McpManager`、`Session`、`start`(并发 + 30s 超时)、`close`(5s 兜底)、`tools`、`mergeOsEnv`、headers 注入 |
+| 新建 | `src/test/java/dev/cortex/mcp/McpManagerTest.java` | 连接成功/失败/超时、`close` 不死锁、并发写共享状态安全 单测 |
+| 改   | `src/main/java/com/cortex/Cortex.java` | 装配 `ConfigLoader.loadConfig`、`McpManager.start`、注册 MCP 工具、`addShutdownHook(mgr::close)` |
 | 新建 | `docs/mcp/mcp-servers.example.yaml` | 配置示例(含 stdio / http 各一个,用 `${VAR}`) |
 
 ---
@@ -37,7 +37,7 @@
 
 ## T2: 配置类型与加载(含两层合并 + 变量展开 + 字段校验)
 
-**文件：** `src/main/java/com/mewcode/mcp/{McpConfig,ConfigLoader}.java`、`src/test/java/dev/mewcode/mcp/ConfigLoaderTest.java`
+**文件：** `src/main/java/com/cortex/mcp/{McpConfig,ConfigLoader}.java`、`src/test/java/dev/cortex/mcp/ConfigLoaderTest.java`
 **依赖：** T1
 **步骤：**
 1. 定义对外 record `McpConfig(Map<String, ServerConfig> servers)`、`ServerConfig(String type, String command, List<String> args, Map<String,String> env, String url, Map<String,String> headers)`(见 plan.md「核心数据结构」)。
@@ -60,7 +60,7 @@
    - `stdio` 必填 `command`；`http` 必填 `url`；缺失则跳过；
    - 违规时 `System.err.printf("[mcp] warn: skip server %s: %s%n", name, reason);`；返回 `Optional.empty()`。
 8. `public static McpConfig loadConfig(Path root)`：
-   - 用户级 = `Path.of(System.getProperty("user.home"), ".mewcode", "config.yaml")`(取家目录失败时跳过用户层不致错)；项目级 = `root.resolve(".mewcode.yaml")`。
+   - 用户级 = `Path.of(System.getProperty("user.home"), ".cortex", "mcp.yaml")`(取家目录失败时跳过用户层不致错)；项目级 = `root.resolve(".cortex/mcp.yaml")`。
    - 两层各自 `loadFile`；解析失败(非"文件不存在") → 一行 stderr 告警 + 该层视为空。
    - 对每层各 server 跑 `applyExpansion`。
    - `mergeServers` 后逐个 `validateServer`,收齐合法 server 组装 `McpConfig`。
@@ -75,10 +75,10 @@
 
 ## T3: 工具适配(McpTool)
 
-**文件：** `src/main/java/com/mewcode/mcp/McpTool.java`、`src/test/java/dev/mewcode/mcp/McpToolTest.java`
+**文件：** `src/main/java/com/cortex/mcp/McpTool.java`、`src/test/java/dev/cortex/mcp/McpToolTest.java`
 **依赖：** T1
 **步骤：**
-1. `import io.modelcontextprotocol.spec.McpSchema;` `import io.modelcontextprotocol.spec.McpSchema.CallToolResult;` `import com.mewcode.tool.Tool;` `import com.mewcode.tool.ToolResult;`。
+1. `import io.modelcontextprotocol.spec.McpSchema;` `import io.modelcontextprotocol.spec.McpSchema.CallToolResult;` `import com.cortex.tool.Tool;` `import com.cortex.tool.ToolResult;`。
 2. 定义包内最小接口 `interface CallerSession { CallToolResult callTool(String name, Map<String,Object> arguments) throws Exception; }`,与 `final class McpTool implements Tool`(见 plan.md「核心数据结构」)。
 3. 包级常量：
    ```java
@@ -127,7 +127,7 @@
 
 ## T4: 连接管理器(McpManager)
 
-**文件：** `src/main/java/com/mewcode/mcp/McpManager.java`、`src/test/java/dev/mewcode/mcp/McpManagerTest.java`
+**文件：** `src/main/java/com/cortex/mcp/McpManager.java`、`src/test/java/dev/cortex/mcp/McpManagerTest.java`
 **依赖：** T2、T3
 **步骤：**
 1. 定义 `public final class McpManager implements AutoCloseable` 与内嵌 `record Session(String name, McpAsyncClient client) {}`(见 plan.md)。
@@ -150,7 +150,7 @@
    - 按 `srv.type()` 构造 transport：
      - **stdio**：`StdioClientTransport transport = new StdioClientTransport(ServerParameters.builder(srv.command()).args(srv.args()).env(mergeOsEnv(srv.env())).build());`
      - **http**：`HttpClient hc = HttpClient.newBuilder().build();` `var transport = HttpClientStreamableHttpTransport.builder(srv.url()).httpClient(hc).customizeRequest(rb -> srv.headers().forEach(rb::header)).disableServerSentEvents(true).build();`
-   - `McpAsyncClient client = McpClient.async(transport).clientInfo(new McpSchema.Implementation("mewcode", version)).build();`
+   - `McpAsyncClient client = McpClient.async(transport).clientInfo(new McpSchema.Implementation("cortex", version)).build();`
    - `client.initialize().block(Duration.ofSeconds(connectTimeoutSec));` 异常 → stderr 告警 `[mcp] warn: connect server <name> failed: <err>` + return。
    - `ListToolsResult lst = client.listTools().block(Duration.ofSeconds(connectTimeoutSec));` 异常 → stderr 告警 + `client.closeGracefully().block(Duration.ofSeconds(5));` + return。
    - 对每个 `t : lst.tools()` 调 `McpTool.adaptTool(name, t, new AsyncCallerSession(client))`；成功的入临时 `List<Tool>`。
@@ -170,10 +170,10 @@
 
 ## T5: Main 接线
 
-**文件：** `src/main/java/com/mewcode/MewCode.java`
+**文件：** `src/main/java/com/cortex/Cortex.java`
 **依赖：** T2、T3、T4
 **步骤：**
-1. import `com.mewcode.mcp.{ConfigLoader, McpConfig, McpManager};` 与 `com.mewcode.tool.Tool;`(若没有)。
+1. import `com.cortex.mcp.{ConfigLoader, McpConfig, McpManager};` 与 `com.cortex.tool.Tool;`(若没有)。
 2. 在 `ToolToolRegistry registry = ToolRegistry.defaults();` 行之后、`PermissionEngine engine = new PermissionEngine(root);` 之前插入：
    ```java
    McpConfig mcpCfg = ConfigLoader.loadConfig(root);
@@ -183,9 +183,9 @@
        registry.register(t);
    }
    ```
-3. `root` 复用现有 `Path.of("").toAbsolutePath()` 结果(已在 `MewCode` 中)；`VERSION` 复用 `public static final String VERSION` 常量。
+3. `root` 复用现有 `Path.of("").toAbsolutePath()` 结果(已在 `Cortex` 中)；`VERSION` 复用 `public static final String VERSION` 常量。
 
-**验证：** `./gradlew shadowJar`；无 MCP 配置时 `java -jar build/libs/mewcode.jar` 能正常进 TUI、内置 6 工具可用；配置一个 command 不存在的 stdio server 时进 TUI 不阻塞、stderr 显示连接失败告警。
+**验证：** `./gradlew shadowJar`；无 MCP 配置时 `java -jar build/libs/cortex.jar` 能正常进 TUI、内置 6 工具可用；配置一个 command 不存在的 stdio server 时进 TUI 不阻塞、stderr 显示连接失败告警。
 
 ## T6: 配置示例
 
@@ -194,7 +194,7 @@
 **步骤：**
 1. 内容(用 YAML 注释说明放置位置与覆盖语义)：
    ```yaml
-   # 项目级放 <root>/.mewcode.yaml；用户级放 ~/.mewcode/config.yaml。
+   # 项目级放 <root>/.cortex/mcp.yaml；用户级放 ~/.cortex/mcp.yaml。
    # 同名 server 项目级完整覆盖用户级。
    # env / headers 的值支持 ${VAR} 从宿主环境变量展开；command/args 不展开。
    mcp_servers:
@@ -223,7 +223,7 @@
 **依赖：** T1–T6
 **步骤：**
 1. 准备一个真实可用的 stdio MCP server。优先用 `npx -y @modelcontextprotocol/server-everything`(官方示例 server,自带 echo / add 等基础工具)；若无 npx,可临时用一个最小 Python/JS server。
-2. 在项目根写一个临时 `.mewcode.yaml` 指向它：
+2. 在项目根写一个临时 `.cortex/mcp.yaml` 指向它：
    ```yaml
    mcp_servers:
      demo:
@@ -231,16 +231,16 @@
        command: npx
        args: ["-y", "@modelcontextprotocol/server-everything"]
    ```
-3. `tmux` 起 mewcode：
+3. `tmux` 起 cortex：
    - 启动日志(stderr)显示 server 连接成功 + 工具数；TUI 状态栏正常；
    - 让模型调用 `mcp__demo__echo` 一类工具：default 模式下弹人在回路 → 允许本次 → 工具结果回灌 → 模型续答；
-   - 选"永久允许"后,本地权限规则被写入；重启 mewcode 后再调同工具不再弹窗(验证永久规则与 MCP 命名空间联动)；
+   - 选"永久允许"后,本地权限规则被写入；重启 cortex 后再调同工具不再弹窗(验证永久规则与 MCP 命名空间联动)；
    - 切到 bypassPermissions：调用不弹窗；但让模型跑 `rm -rf /` 仍被内置黑名单拦下(MCP 工具不绕过黑名单的内置作用域)；
    - Esc 取消弹窗：干净回到 idle,不退出程序；
-   - `q` 退出 mewcode 后 `ps -ef | grep server-everything` 确认子进程已终止；
+   - `q` 退出 cortex 后 `ps -ef | grep server-everything` 确认子进程已终止；
 4. 配置一个 command 不存在的 server + 一个能跑的 server：启动 stderr 有失败告警,能跑的 server 工具仍可用。
 
-**验证：** 上述全部观察通过；删除临时 `.mewcode.yaml`,恢复项目根干净。
+**验证：** 上述全部观察通过；删除临时 `.cortex/mcp.yaml`,恢复项目根干净。
 
 ## T8: 全量编译测试与规范
 
@@ -250,7 +250,7 @@
 1. `./gradlew compileJava` (代码风格由 IDE 保证)(google-java-format 应无差异；如有则 `./gradlew spotless:apply`)。
 2. `./gradlew shadowJar`(应无错误、无未使用 import 告警)。
 3. `./gradlew test`(覆盖 config、conversation、tool、agent、prompt、permission、tui、**mcp** 三组单测)。
-4. 重点跑 `./gradlew test -Dtest='com.mewcode.mcp.*'` 多次(`-Dsurefire.rerunFailingTestsCount=3`),确认 virtual thread 并发无偶发失败。
+4. 重点跑 `./gradlew test -Dtest='com.cortex.mcp.*'` 多次(`-Dsurefire.rerunFailingTestsCount=3`),确认 virtual thread 并发无偶发失败。
 5. `git grep -E '(Bearer|sk-|ghp_|github_pat_)[A-Za-z0-9_-]{16,}'`(应无命中：凭据不落盘)。
 6. `git check-ignore -q docs/mcp/mcp-servers.example.yaml` 不需要忽略(示例只含 `${VAR}`)。
 

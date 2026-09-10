@@ -4,58 +4,58 @@
 
 | 操作 | 文件 | 职责 |
 |------|------|------|
-| 新建 | `src/main/java/com/mewcode/subagent/package-info.java` | 包注释 |
-| 新建 | `src/main/java/com/mewcode/subagent/Definition.java` | Definition record / Source enum |
-| 新建 | `src/main/java/com/mewcode/subagent/Parser.java` | parseFrontmatterAndBody + validateMeta |
-| 新建 | `src/test/java/dev/mewcode/subagent/ParserTest.java` | 解析与字段校验单测 |
-| 新建 | `src/main/java/com/mewcode/subagent/Catalog.java` | Catalog + load / resolve / list / forkDefinition |
-| 新建 | `src/test/java/dev/mewcode/subagent/CatalogTest.java` | 多来源加载与覆盖测试 |
-| 新建 | `src/main/java/com/mewcode/subagent/BuiltinLoader.java` | classpath resource 加载 + builtinDefinitions() |
+| 新建 | `src/main/java/com/cortex/subagent/package-info.java` | 包注释 |
+| 新建 | `src/main/java/com/cortex/subagent/Definition.java` | Definition record / Source enum |
+| 新建 | `src/main/java/com/cortex/subagent/Parser.java` | parseFrontmatterAndBody + validateMeta |
+| 新建 | `src/test/java/dev/cortex/subagent/ParserTest.java` | 解析与字段校验单测 |
+| 新建 | `src/main/java/com/cortex/subagent/Catalog.java` | Catalog + load / resolve / list / forkDefinition |
+| 新建 | `src/test/java/dev/cortex/subagent/CatalogTest.java` | 多来源加载与覆盖测试 |
+| 新建 | `src/main/java/com/cortex/subagent/BuiltinLoader.java` | classpath resource 加载 + builtinDefinitions() |
 | 新建 | `src/main/resources/subagent/builtin/general-purpose.md` | 内置 general-purpose 定义 |
 | 新建 | `src/main/resources/subagent/builtin/explore.md` | 内置 Explore 定义 |
 | 新建 | `src/main/resources/subagent/builtin/plan.md` | 内置 Plan 定义 |
-| 新建 | `src/main/java/com/mewcode/subagent/LaunchFork.java` | LaunchFork / 公用 wiring 辅助函数 |
-| 新建 | `src/test/java/dev/mewcode/subagent/LaunchForkTest.java` | LaunchFork 流程测试 |
-| 新建 | `src/main/java/com/mewcode/task/package-info.java` | 包注释 |
-| 新建 | `src/main/java/com/mewcode/task/Manager.java` | Manager + BackgroundTask + launch / adopt / stop / sendMessage / subscribeDone |
-| 新建 | `src/main/java/com/mewcode/task/Status.java` | enum Status |
-| 新建 | `src/main/java/com/mewcode/task/Usage.java` | record Usage |
-| 新建 | `src/main/java/com/mewcode/task/PartialState.java` | record PartialState |
-| 新建 | `src/test/java/dev/mewcode/task/ManagerTest.java` | 后台任务全生命周期测试 |
-| 新建 | `src/main/java/com/mewcode/task/TaskListTool.java` | TaskList 工具 |
-| 新建 | `src/main/java/com/mewcode/task/TaskGetTool.java` | TaskGet 工具 |
-| 新建 | `src/main/java/com/mewcode/task/TaskStopTool.java` | TaskStop 工具 |
-| 新建 | `src/main/java/com/mewcode/task/SendMessageTool.java` | SendMessage 工具 |
-| 新建 | `src/test/java/dev/mewcode/task/ToolsTest.java` | 4 个工具的单测 |
-| 新建 | `src/main/java/com/mewcode/agent/RunToCompletion.java` | runToCompletion 方法实现(可作为 Agent.java 的同包补充) |
-| 新建 | `src/test/java/dev/mewcode/agent/RunToCompletionTest.java` | runToCompletion / dontAsk / maxTurns 测试 |
-| 新建 | `src/main/java/com/mewcode/agent/Fork.java` | buildForkedMessages + isForkContext + FORK_BOILERPLATE |
-| 新建 | `src/test/java/dev/mewcode/agent/ForkTest.java` | Fork 消息构造与上下文识别测试 |
-| 新建 | `src/main/java/com/mewcode/agent/AgentTool.java` | AgentTool + execute |
-| 新建 | `src/test/java/dev/mewcode/agent/AgentToolTest.java` | Agent 工具调用、嵌套阻断、超时切后台测试 |
-| 新建 | `src/main/java/com/mewcode/agent/ApprovalUpgrader.java` | ApprovalUpgrader 接口 + DEFAULT 实现 |
-| 新建 | `src/main/java/com/mewcode/agent/AgentCatalogPort.java` | 接口,断开 agent ↔ subagent 循环依赖 |
-| 新建 | `src/main/java/com/mewcode/agent/TaskManagerPort.java` | 接口,断开 agent ↔ task 循环依赖 |
-| 新建 | `src/main/java/com/mewcode/tool/Filter.java` | ALL_AGENT_DISALLOWED / ASYNC_AGENT_ALLOWED / applyAgentToolFilter |
-| 新建 | `src/test/java/dev/mewcode/tool/FilterTest.java` | 过滤多层防线测试 |
-| 新建 | `src/main/java/com/mewcode/tui/Tasks.java` | consumeTaskDone + buildTaskNotification + ESC 切后台辅助 |
-| 修改 | `src/main/java/com/mewcode/agent/Agent.java` | 加 systemPrompt/maxTurns/permissionMode/dontAsk/approvalUpgrader 字段;run 抽 runIter;runGuarded 加 dontAsk 短路 + approvalUpgrader 升级 |
-| 修改 | `src/main/java/com/mewcode/agent/Agent.java`(Builder 内部类) | 加 systemPrompt / maxTurns / permissionMode / dontAsk / approvalUpgrader / provider 选项 |
-| 修改 | `src/test/java/dev/mewcode/agent/AgentTest.java` | 不破坏既有测试 |
-| 修改 | `src/main/java/com/mewcode/tool/ToolRegistry.java` | 不动(过滤逻辑在 Filter.java) |
-| 修改 | `src/main/java/com/mewcode/tui/MewCodeModel.java` | TuiParams 加 taskMgr/subAgentCatalog;MewCodeModel 持有;init 启 consumeTaskDone;AgentTool 注册后 setParent |
-| 修改 | `src/main/java/com/mewcode/tui/Stream.java` | updateStreaming 加 ESC → adoptRunning 分支 |
-| 修改 | `src/main/java/com/mewcode/tui/SkillFork.java` | 改造为调 subagent.LaunchFork.launch |
-| 修改 | `src/test/java/dev/mewcode/tui/MewCodeModelTest.java` | 补 ESC 切后台、task-notification 注入测试 |
-| 修改 | `src/main/java/com/mewcode/config/Config.java` | 加 enableSubAgentBackground(Boolean,默认 true) |
-| 修改 | `src/main/java/com/mewcode/MewCode.java` | Catalog.load / new Manager / 4 个 task 工具注册 / AgentTool 注册 + setParent;taskMgr / subAgentCatalog 传给 MewCodeModel |
+| 新建 | `src/main/java/com/cortex/subagent/LaunchFork.java` | LaunchFork / 公用 wiring 辅助函数 |
+| 新建 | `src/test/java/dev/cortex/subagent/LaunchForkTest.java` | LaunchFork 流程测试 |
+| 新建 | `src/main/java/com/cortex/task/package-info.java` | 包注释 |
+| 新建 | `src/main/java/com/cortex/task/Manager.java` | Manager + BackgroundTask + launch / adopt / stop / sendMessage / subscribeDone |
+| 新建 | `src/main/java/com/cortex/task/Status.java` | enum Status |
+| 新建 | `src/main/java/com/cortex/task/Usage.java` | record Usage |
+| 新建 | `src/main/java/com/cortex/task/PartialState.java` | record PartialState |
+| 新建 | `src/test/java/dev/cortex/task/ManagerTest.java` | 后台任务全生命周期测试 |
+| 新建 | `src/main/java/com/cortex/task/TaskListTool.java` | TaskList 工具 |
+| 新建 | `src/main/java/com/cortex/task/TaskGetTool.java` | TaskGet 工具 |
+| 新建 | `src/main/java/com/cortex/task/TaskStopTool.java` | TaskStop 工具 |
+| 新建 | `src/main/java/com/cortex/task/SendMessageTool.java` | SendMessage 工具 |
+| 新建 | `src/test/java/dev/cortex/task/ToolsTest.java` | 4 个工具的单测 |
+| 新建 | `src/main/java/com/cortex/agent/RunToCompletion.java` | runToCompletion 方法实现(可作为 Agent.java 的同包补充) |
+| 新建 | `src/test/java/dev/cortex/agent/RunToCompletionTest.java` | runToCompletion / dontAsk / maxTurns 测试 |
+| 新建 | `src/main/java/com/cortex/agent/Fork.java` | buildForkedMessages + isForkContext + FORK_BOILERPLATE |
+| 新建 | `src/test/java/dev/cortex/agent/ForkTest.java` | Fork 消息构造与上下文识别测试 |
+| 新建 | `src/main/java/com/cortex/agent/AgentTool.java` | AgentTool + execute |
+| 新建 | `src/test/java/dev/cortex/agent/AgentToolTest.java` | Agent 工具调用、嵌套阻断、超时切后台测试 |
+| 新建 | `src/main/java/com/cortex/agent/ApprovalUpgrader.java` | ApprovalUpgrader 接口 + DEFAULT 实现 |
+| 新建 | `src/main/java/com/cortex/agent/AgentCatalogPort.java` | 接口,断开 agent ↔ subagent 循环依赖 |
+| 新建 | `src/main/java/com/cortex/agent/TaskManagerPort.java` | 接口,断开 agent ↔ task 循环依赖 |
+| 新建 | `src/main/java/com/cortex/tool/Filter.java` | ALL_AGENT_DISALLOWED / ASYNC_AGENT_ALLOWED / applyAgentToolFilter |
+| 新建 | `src/test/java/dev/cortex/tool/FilterTest.java` | 过滤多层防线测试 |
+| 新建 | `src/main/java/com/cortex/tui/Tasks.java` | consumeTaskDone + buildTaskNotification + ESC 切后台辅助 |
+| 修改 | `src/main/java/com/cortex/agent/Agent.java` | 加 systemPrompt/maxTurns/permissionMode/dontAsk/approvalUpgrader 字段;run 抽 runIter;runGuarded 加 dontAsk 短路 + approvalUpgrader 升级 |
+| 修改 | `src/main/java/com/cortex/agent/Agent.java`(Builder 内部类) | 加 systemPrompt / maxTurns / permissionMode / dontAsk / approvalUpgrader / provider 选项 |
+| 修改 | `src/test/java/dev/cortex/agent/AgentTest.java` | 不破坏既有测试 |
+| 修改 | `src/main/java/com/cortex/tool/ToolRegistry.java` | 不动(过滤逻辑在 Filter.java) |
+| 修改 | `src/main/java/com/cortex/tui/CortexModel.java` | TuiParams 加 taskMgr/subAgentCatalog;CortexModel 持有;init 启 consumeTaskDone;AgentTool 注册后 setParent |
+| 修改 | `src/main/java/com/cortex/tui/Stream.java` | updateStreaming 加 ESC → adoptRunning 分支 |
+| 修改 | `src/main/java/com/cortex/tui/SkillFork.java` | 改造为调 subagent.LaunchFork.launch |
+| 修改 | `src/test/java/dev/cortex/tui/CortexModelTest.java` | 补 ESC 切后台、task-notification 注入测试 |
+| 修改 | `src/main/java/com/cortex/config/Config.java` | 加 enableSubAgentBackground(Boolean,默认 true) |
+| 修改 | `src/main/java/com/cortex/Cortex.java` | Catalog.load / new Manager / 4 个 task 工具注册 / AgentTool 注册 + setParent;taskMgr / subAgentCatalog 传给 CortexModel |
 
 ## T1: subagent 包的 Definition 与 Source 类型
 
-**文件:** `src/main/java/com/mewcode/subagent/Definition.java`
+**文件:** `src/main/java/com/cortex/subagent/Definition.java`
 **依赖:** 无
 **步骤:**
-1. 新建包 `com.mewcode.subagent`,加 `Definition.java`,声明 `enum Source` 类型与四个常量:
+1. 新建包 `com.cortex.subagent`,加 `Definition.java`,声明 `enum Source` 类型与四个常量:
    - `BUILTIN`
    - `USER`
    - `PROJECT`
@@ -69,7 +69,7 @@
 
 ## T2: subagent 解析器
 
-**文件:** `src/main/java/com/mewcode/subagent/Parser.java`
+**文件:** `src/main/java/com/cortex/subagent/Parser.java`
 **依赖:** T1
 **步骤:**
 1. 新建 `Parser.java`,从 `skills.Parser` 复制 `parseFrontmatterAndBody` 与 `UTF8_BOM` 常量(几乎 ✓ 不变,改包名)
@@ -100,7 +100,7 @@
 
 ## T3: subagent 解析器测试
 
-**文件:** `src/test/java/dev/mewcode/subagent/ParserTest.java`
+**文件:** `src/test/java/dev/cortex/subagent/ParserTest.java`
 **依赖:** T2
 **步骤:**
 1. JUnit 5 `@ParameterizedTest` + `@MethodSource`:正常完整 frontmatter / 仅必填 / model 非法 → 警告 fallback / permissionMode=dontAsk → dontAsk=true / 缺 name 报错 / 缺 description 报错 / frontmatter 未关闭 → 异常
@@ -124,7 +124,7 @@
    maxTurns: 30
    ---
 
-   你是 MewCode 的通用 Agent。根据用户的消息,使用可用工具完成任务。
+   你是 Cortex 的通用 Agent。根据用户的消息,使用可用工具完成任务。
    把任务做完,不要过度设计,但也不要做一半就停。
    完成后用简洁的报告回复:做了什么、关键发现。
    调用方会把结果转述给用户,所以只需要包含要点。
@@ -169,7 +169,7 @@
 
 ## T5: subagent classpath resource 加载
 
-**文件:** `src/main/java/com/mewcode/subagent/BuiltinLoader.java`
+**文件:** `src/main/java/com/cortex/subagent/BuiltinLoader.java`
 **依赖:** T2, T4
 **步骤:**
 1. 新建 `BuiltinLoader.java`,实现 `static java.util.List<Definition> builtinDefinitions()`:
@@ -186,7 +186,7 @@
 
 ## T6: Catalog 与三层加载
 
-**文件:** `src/main/java/com/mewcode/subagent/Catalog.java`
+**文件:** `src/main/java/com/cortex/subagent/Catalog.java`
 **依赖:** T1, T2, T5
 **步骤:**
 1. 新建 `Catalog.java`,声明:
@@ -201,8 +201,8 @@
 2. 实现 `public static Catalog load(java.nio.file.Path root)`:
    - `Catalog c = new Catalog();`
    - 加载 builtin → `c.addAll(BuiltinLoader.builtinDefinitions(), Source.BUILTIN)`
-   - 加载 user → `c.addAll(loadFromDir(Path.of(System.getProperty("user.home"), ".mewcode/agents"), Source.USER), Source.USER)`
-   - 加载 project → `c.addAll(loadFromDir(root.resolve(".mewcode/agents"), Source.PROJECT), Source.PROJECT)`
+   - 加载 user → `c.addAll(loadFromDir(Path.of(System.getProperty("user.home"), ".cortex/agents"), Source.USER), Source.USER)`
+   - 加载 project → `c.addAll(loadFromDir(root.resolve(".cortex/agents"), Source.PROJECT), Source.PROJECT)`
    - plugin 层本期跳过
 3. 实现 `private static List<Definition> loadFromDir(Path dir, Source source)`:
    - 目录不存在 → 返回 `List.of()`
@@ -229,7 +229,7 @@
 
 ## T7: Catalog 测试
 
-**文件:** `src/test/java/dev/mewcode/subagent/CatalogTest.java`
+**文件:** `src/test/java/dev/cortex/subagent/CatalogTest.java`
 **依赖:** T6
 **步骤:**
 1. 测试 `BuiltinLoader.builtinDefinitions()` 返回 3 个 def(general-purpose / Explore / Plan)
@@ -242,7 +242,7 @@
 
 ## T8: 工具过滤多层防线
 
-**文件:** `src/main/java/com/mewcode/tool/Filter.java`
+**文件:** `src/main/java/com/cortex/tool/Filter.java`
 **依赖:** 无
 **步骤:**
 1. 新建 `Filter.java`,声明三个常量:
@@ -280,7 +280,7 @@
 
 ## T9: 工具过滤测试
 
-**文件:** `src/test/java/dev/mewcode/tool/FilterTest.java`
+**文件:** `src/test/java/dev/cortex/tool/FilterTest.java`
 **依赖:** T8
 **步骤:**
 1. `@ParameterizedTest` 覆盖各组合:
@@ -296,7 +296,7 @@
 
 ## T10: Agent 包扩展 - 新增 Builder 选项
 
-**文件:** `src/main/java/com/mewcode/agent/Agent.java`
+**文件:** `src/main/java/com/cortex/agent/Agent.java`
 **依赖:** 无
 **步骤:**
 1. 在 `Agent` 类加字段:
@@ -325,7 +325,7 @@
 
 ## T11: ApprovalUpgrader 接口
 
-**文件:** `src/main/java/com/mewcode/agent/ApprovalUpgrader.java`
+**文件:** `src/main/java/com/cortex/agent/ApprovalUpgrader.java`
 **依赖:** T10
 **步骤:**
 1. 新建文件,声明:
@@ -342,7 +342,7 @@
 
 ## T12: Fork 路径辅助函数
 
-**文件:** `src/main/java/com/mewcode/agent/Fork.java`
+**文件:** `src/main/java/com/cortex/agent/Fork.java`
 **依赖:** 无(纯函数)
 **步骤:**
 1. 新建 `Fork.java`,声明常量:
@@ -375,7 +375,7 @@
 
 ## T13: Fork 辅助函数测试
 
-**文件:** `src/test/java/dev/mewcode/agent/ForkTest.java`
+**文件:** `src/test/java/dev/cortex/agent/ForkTest.java`
 **依赖:** T12
 **步骤:**
 1. 测试 `buildForkedMessages` 空 parent → 返回单条 user 消息含 Boilerplate + task
@@ -387,7 +387,7 @@
 
 ## T14: runGuarded 加 dontAsk 短路与 approvalUpgrader
 
-**文件:** `src/main/java/com/mewcode/agent/Agent.java`
+**文件:** `src/main/java/com/cortex/agent/Agent.java`
 **依赖:** T10, T11
 **步骤:**
 1. 修改 `runGuarded`,在 `case ASK:` 分支里:
@@ -421,7 +421,7 @@
 
 ## T15: runToCompletion 实现
 
-**文件:** `src/main/java/com/mewcode/agent/RunToCompletion.java`(或直接放在 `Agent.java`)
+**文件:** `src/main/java/com/cortex/agent/RunToCompletion.java`(或直接放在 `Agent.java`)
 **依赖:** T10, T14
 **步骤:**
 1. 实现:
@@ -446,7 +446,7 @@
 
 ## T16: runToCompletion 测试
 
-**文件:** `src/test/java/dev/mewcode/agent/RunToCompletionTest.java`
+**文件:** `src/test/java/dev/cortex/agent/RunToCompletionTest.java`
 **依赖:** T15
 **步骤:**
 1. 用 mock provider(已有 testhelpers)模拟一个回合返回纯文本的子 Agent → `runToCompletion` 返回 `"ok"`,不抛异常
@@ -460,7 +460,7 @@
 
 ## T17: Agent 工具实现
 
-**文件:** `src/main/java/com/mewcode/agent/AgentTool.java`
+**文件:** `src/main/java/com/cortex/agent/AgentTool.java`
 **依赖:** T8, T12, T15
 **步骤:**
 1. 新建文件,声明:
@@ -472,14 +472,14 @@
        private final boolean bgEnabled;
    }
 
-   // src/main/java/com/mewcode/agent/AgentCatalogPort.java
+   // src/main/java/com/cortex/agent/AgentCatalogPort.java
    public interface AgentCatalogPort {
        Optional<Definition> resolve(String name); // Definition 类型见下
        Definition forkDefinition();
        List<Definition> list();
    }
 
-   // src/main/java/com/mewcode/agent/TaskManagerPort.java
+   // src/main/java/com/cortex/agent/TaskManagerPort.java
    public interface TaskManagerPort {
        String launch(AtomicBoolean parentCancel, Agent ag, ConversationManager conv, String name, String task);
        String adoptRunning(AtomicBoolean parentCancel, Agent ag, ConversationManager conv, String name,
@@ -487,7 +487,7 @@
        Optional<Outcome> upgradeApproval(AtomicBoolean cancelFlag, ApprovalRequest req);
    }
    ```
-2. **解决循环依赖**:agent 包不直接 import subagent 包,而是通过 port 接口反向适配;`subagent.Catalog implements AgentCatalogPort`,`task.Manager implements TaskManagerPort`。`Definition` 类型可以直接被 agent 包引用——subagent.Definition 只引用 `permission`,没问题。直接 `import com.mewcode.subagent.Definition`。
+2. **解决循环依赖**:agent 包不直接 import subagent 包,而是通过 port 接口反向适配;`subagent.Catalog implements AgentCatalogPort`,`task.Manager implements TaskManagerPort`。`Definition` 类型可以直接被 agent 包引用——subagent.Definition 只引用 `permission`,没问题。直接 `import com.cortex.subagent.Definition`。
 3. **AgentTool 接口实现**:
    - `name()` = `"Agent"`
    - `description()` 动态:基础描述 + `"subagent_type 可选值:" + String.join(", ", catalog.list().stream().map(Definition::name).toList())`
@@ -585,13 +585,13 @@
    }
    ```
 5. 实现辅助函数:`isSubAgentContext / withSubAgentContext / parentConvOf / aggregatePartial`
-6. 提供 `setParent(Agent a)` 让 Main 在 `new MewCodeModel(...)` 之后回填 parent 引用
+6. 提供 `setParent(Agent a)` 让 Main 在 `new CortexModel(...)` 之后回填 parent 引用
 
 **验证:** `./gradlew test -Dtest=AgentToolTest` 通过(T18)
 
 ## T18: Agent 工具测试
 
-**文件:** `src/test/java/dev/mewcode/agent/AgentToolTest.java`
+**文件:** `src/test/java/dev/cortex/agent/AgentToolTest.java`
 **依赖:** T17
 **步骤:**
 1. 测试 missing prompt → 返回错误
@@ -606,10 +606,10 @@
 
 ## T19: task 包基础结构
 
-**文件:** `src/main/java/com/mewcode/task/Manager.java`
+**文件:** `src/main/java/com/cortex/task/Manager.java`
 **依赖:** T10, T15
 **步骤:**
-1. 新建包 `com.mewcode.task`,加 `package-info.java` 与 `Manager.java`
+1. 新建包 `com.cortex.task`,加 `package-info.java` 与 `Manager.java`
 2. 声明 `enum Status { RUNNING, COMPLETED, FAILED, CANCELLED }`(单独 `Status.java`)
 3. 声明 `record Usage(long input, long output, long cacheWrite, long cacheRead)`(对齐 `agent.Usage`)
 4. 声明 `BackgroundTask` 类(字段如 plan.md;字段大多 volatile;`getters` 不可省略)
@@ -631,7 +631,7 @@
 
 ## T20: Manager.launch 实现
 
-**文件:** `src/main/java/com/mewcode/task/Manager.java`
+**文件:** `src/main/java/com/cortex/task/Manager.java`
 **依赖:** T19
 **步骤:**
 1. 实现:
@@ -677,7 +677,7 @@
 
 ## T21: Manager.stop / adoptRunning / sendMessage / upgradeApproval
 
-**文件:** `src/main/java/com/mewcode/task/Manager.java`
+**文件:** `src/main/java/com/cortex/task/Manager.java`
 **依赖:** T20
 **步骤:**
 1. 实现 `boolean stop(String id)`:查 tasks → 调 `bt.cancelFlag.set(true)`;返回是否找到
@@ -697,7 +697,7 @@
 
 ## T22: task 包测试
 
-**文件:** `src/test/java/dev/mewcode/task/ManagerTest.java`
+**文件:** `src/test/java/dev/cortex/task/ManagerTest.java`
 **依赖:** T20, T21
 **步骤:**
 1. 用 mock provider + mock agent 模拟一个 subAgent → launch → 用 `BlockingQueue.poll()` 等 donePub → 验证 `status==COMPLETED`,result 正确
@@ -710,7 +710,7 @@
 
 ## T23: 4 个后台任务工具
 
-**文件:** `src/main/java/com/mewcode/task/{TaskListTool,TaskGetTool,TaskStopTool,SendMessageTool}.java`
+**文件:** `src/main/java/com/cortex/task/{TaskListTool,TaskGetTool,TaskStopTool,SendMessageTool}.java`
 **依赖:** T19, T20, T21
 **步骤:**
 1. 实现 `TaskListTool`:
@@ -731,7 +731,7 @@
 
 ## T24: 4 个工具的单测
 
-**文件:** `src/test/java/dev/mewcode/task/ToolsTest.java`
+**文件:** `src/test/java/dev/cortex/task/ToolsTest.java`
 **依赖:** T23
 **步骤:**
 1. TaskList:launch 几个任务后调 → 返回 JSON 含所有
@@ -744,7 +744,7 @@
 
 ## T25: TUI 加 taskMgr / subAgentCatalog wiring
 
-**文件:** `src/main/java/com/mewcode/tui/MewCodeModel.java`
+**文件:** `src/main/java/com/cortex/tui/CortexModel.java`
 **依赖:** T6, T19, T23
 **步骤:**
 1. 在 `TuiParams` record 加字段:
@@ -752,12 +752,12 @@
    Manager taskMgr;
    Catalog subAgentCatalog;
    ```
-2. 在 `MewCodeModel` 加字段:
+2. 在 `CortexModel` 加字段:
    ```java
    private final Manager taskMgr;
    private final Catalog subAgentCatalog;
    ```
-3. 在 `MewCodeModel` 构造内:
+3. 在 `CortexModel` 构造内:
    - 把 params 字段挂到字段
    - `init()` 末尾启动 `Thread.startVirtualThread(this::consumeTaskDone)`
 4. 在 Agent 构造之后(单 provider 路径):
@@ -768,7 +768,7 @@
 
 ## T26: task notification 注入
 
-**文件:** `src/main/java/com/mewcode/tui/Tasks.java`
+**文件:** `src/main/java/com/cortex/tui/Tasks.java`
 **依赖:** T19, T25
 **步骤:**
 1. 新建文件,实现:
@@ -801,7 +801,7 @@
 
 ## T27: ESC 切后台
 
-**文件:** `src/main/java/com/mewcode/tui/Stream.java`
+**文件:** `src/main/java/com/cortex/tui/Stream.java`
 **依赖:** T19, T25
 **步骤:**
 1. 在 `updateStreaming` 内对 JLine/tui.tea `KeyType.Escape` 事件:
@@ -829,7 +829,7 @@
 
 ## T28: Skill fork 改造
 
-**文件:** `src/main/java/com/mewcode/tui/SkillFork.java`
+**文件:** `src/main/java/com/cortex/tui/SkillFork.java`
 **依赖:** T15
 **步骤:**
 1. 现有 `runSubAgent` 内部已经在用 `subAgent.run`;改造为用 `runToCompletion`:
@@ -855,14 +855,14 @@
 2. **注意**:现有 `skills.Executor` 调用前已经把任务作为 user 消息装填到 conv(`buildForkConversation` 末尾 `conv.addUser(rendered)`)。新版 `runToCompletion` 内部又会 `conv.addUser(task)`;若 task=="" 会追加空消息。**改 `runToCompletion` 为允许 task=="" 时不追加**(`if (!task.isEmpty()) conv.addUser(task);`),或者改 `skills.Executor` 不再装填 user 消息让 `runToCompletion` 装填。
 3. 选第一种方案——`runToCompletion` 加 if 判断
 
-**验证:** `./gradlew test -Dtest=SkillsTest -Dtest=MewCodeModelTest` 现有测试不破
+**验证:** `./gradlew test -Dtest=SkillsTest -Dtest=CortexModelTest` 现有测试不破
 
 ## T29: AgentTool 注册到 ToolRegistry
 
-**文件:** `src/main/java/com/mewcode/MewCode.java`
+**文件:** `src/main/java/com/cortex/Cortex.java`
 **依赖:** T17, T20, T23, T25
 **步骤:**
-1. 在 `MewCode.java` 适当位置(`skills.Catalog.load` 之后):
+1. 在 `Cortex.java` 适当位置(`skills.Catalog.load` 之后):
    ```java
    Catalog subAgentCatalog = Catalog.load(root);
    Manager taskMgr = new Manager();
@@ -878,25 +878,25 @@
            cfg.enableSubAgentBackground());
    registry.register(agentTool);
    ```
-2. `new MewCodeModel(...)` 调用扩展 TuiParams:
+2. `new CortexModel(...)` 调用扩展 TuiParams:
    ```java
-   MewCodeModel app = new MewCodeModel(..., new TuiParams(
+   CortexModel app = new CortexModel(..., new TuiParams(
            writer, memMgr, instructionText, memoryText,
            sessionsDir, catalog, hookEngine,
            taskMgr, subAgentCatalog));
    ```
-3. `new MewCodeModel(...)` 返回后回填 parent:
+3. `new CortexModel(...)` 返回后回填 parent:
    ```java
    Agent main = app.mainAgent();
    if (main != null) agentTool.setParent(main);
    ```
-4. `MewCodeModel` 加 `public Agent mainAgent()` 方法返回 `this.agent`
+4. `CortexModel` 加 `public Agent mainAgent()` 方法返回 `this.agent`
 
-**验证:** `./gradlew shadowJar` 编译通过;运行 mewcode 不报错
+**验证:** `./gradlew shadowJar` 编译通过;运行 cortex 不报错
 
 ## T30: config 加 enableSubAgentBackground
 
-**文件:** `src/main/java/com/mewcode/config/Config.java`
+**文件:** `src/main/java/com/cortex/config/Config.java`
 **依赖:** 无
 **步骤:**
 1. 在 `Config` record 加字段:
@@ -915,7 +915,7 @@
 
 ## T31: subagent.LaunchFork 公用 wiring
 
-**文件:** `src/main/java/com/mewcode/subagent/LaunchFork.java`
+**文件:** `src/main/java/com/cortex/subagent/LaunchFork.java`
 **依赖:** T6, T15, T17
 **步骤:**
 1. 新建 `LaunchFork.java`,实现:
@@ -941,7 +941,7 @@
    - 调 `runToCompletion(cancelFlag, opts.conv(), "" /* conv 已含 task */, opts.eventsSink())`
    - 返回 finalText / 抛异常
 3. **避免循环依赖**:`subagent.LaunchFork` 引用 agent 包(为构造 Agent);agent 不引用 subagent(AgentTool 是 agent 包内部,工厂签名接受 `AgentCatalogPort` 接口避开 import)
-   - 但 AgentTool 内还是要 `import com.mewcode.subagent.Definition`——因为 Definition 类型。这就形成 subagent ← agent 之间的混乱。
+   - 但 AgentTool 内还是要 `import com.cortex.subagent.Definition`——因为 Definition 类型。这就形成 subagent ← agent 之间的混乱。
    - **拆解方案**:
      - `Definition` 类型放在 subagent 包
      - Catalog 行为通过 agent 包的 `AgentCatalogPort` 接口暴露(只用 `list` 必要方法)
@@ -954,15 +954,15 @@
    - `tui/SkillFork.java` 调 `agent.LaunchFork.launch(...)`(把 `Definition` 当参数传入)
 
 **重新调整文件结构:**
-- 删除 `src/main/java/com/mewcode/subagent/LaunchFork.java`(本任务取消)
-- 新建 `src/main/java/com/mewcode/agent/LaunchFork.java` 实现 LaunchFork
+- 删除 `src/main/java/com/cortex/subagent/LaunchFork.java`(本任务取消)
+- 新建 `src/main/java/com/cortex/agent/LaunchFork.java` 实现 LaunchFork
 - skills 的 fork 回调改为调 `agent.LaunchFork.launch`
 
 **验证:** 见 T28 验证
 
 ## T32: 集成测试 - 完整路径
 
-**文件:** `src/test/java/dev/mewcode/agent/AgentToolIntegrationTest.java`(新增)
+**文件:** `src/test/java/dev/cortex/agent/AgentToolIntegrationTest.java`(新增)
 **依赖:** T17, T20, T29
 **步骤:**
 1. 端到端 mock:构造一个 mock provider 让主 Agent 调 Agent 工具(`subagent_type="Explore"`),子 Agent 也跑回纯文本

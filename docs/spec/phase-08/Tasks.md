@@ -4,43 +4,43 @@
 
 | 操作 | 文件 | 职责 |
 |------|------|------|
-| 修改 | `src/main/java/com/mewcode/compact/SessionContext.java` | session ID 格式变更、新增 `sessionDir`、`open`、`parseSessionTime` |
-| 修改 | `src/main/java/com/mewcode/conversation/Conversation.java` | 回调字段、`fromMessages`、append/replace 末尾触发 |
-| 修改 | `src/test/java/dev/mewcode/conversation/ConversationTest.java` | 回调测试 |
-| 修改 | `src/main/java/com/mewcode/prompt/Prompt.java` | `buildSystemPrompt` 签名变更 |
-| 修改 | `src/main/java/com/mewcode/prompt/Modules.java` | `optionalModules` 接受参数 |
-| 修改 | `src/test/java/dev/mewcode/prompt/PromptTest.java` | 新签名测试 |
-| 新建 | `src/main/java/com/mewcode/instructions/Loader.java` | Loader 类型、三层加载、@include 展开 |
-| 新建 | `src/test/java/dev/mewcode/instructions/LoaderTest.java` | @include 深度/环路/逃逸/缺失文件测试 |
-| 新建 | `src/main/java/com/mewcode/session/Entry.java` | JSONL 行 record |
-| 新建 | `src/main/java/com/mewcode/session/Writer.java` | Writer、create/open、append |
-| 新建 | `src/main/java/com/mewcode/session/SessionInfo.java` | record SessionInfo |
-| 新建 | `src/main/java/com/mewcode/session/SessionList.java` | listSessions |
-| 新建 | `src/main/java/com/mewcode/session/SessionLoader.java` | load、坏行跳过、孤立截断 |
-| 新建 | `src/main/java/com/mewcode/session/SessionCleaner.java` | cleanExpired |
-| 新建 | `src/test/java/dev/mewcode/session/SessionTest.java` | JSONL 读写、列表、恢复、清理测试 |
-| 新建 | `src/main/java/com/mewcode/memory/NoteType.java` | enum |
-| 新建 | `src/main/java/com/mewcode/memory/Note.java` | record |
-| 新建 | `src/main/java/com/mewcode/memory/UpdateAction.java` | record |
-| 新建 | `src/main/java/com/mewcode/memory/Store.java` | 笔记文件 CRUD、索引读写 |
-| 新建 | `src/main/java/com/mewcode/memory/Manager.java` | loadIndex、updateAsync |
-| 新建 | `src/main/java/com/mewcode/memory/PromptTemplates.java` | 记忆更新 prompt 模板（中文） |
-| 新建 | `src/test/java/dev/mewcode/memory/MemoryTest.java` | 索引加载、操作执行、截断测试 |
-| 修改 | `src/main/java/com/mewcode/agent/Agent.java` | `run` 末尾触发记忆更新 |
-| 修改 | `src/main/java/com/mewcode/agent/SessionRuntime.java` | `turnCount`、关联 memMgr |
-| 修改 | `src/main/java/com/mewcode/tui/Commands.java` | /resume 命令注册 |
-| 新建 | `src/main/java/com/mewcode/tui/ResumeStyles.java + MarkdownRenderer.java` | RESUMING、会话列表项、updateResuming |
-| 修改 | `src/main/java/com/mewcode/tui/MewCodeModel.java` | RESUMING 集成、字段新增 |
-| 修改 | `src/main/java/com/mewcode/MewCode.java` | 启动流程串联 |
-| 修改 | `.mewcode/config.yaml.example` | 配置示例补充说明 |
+| 修改 | `src/main/java/com/cortex/compact/SessionContext.java` | session ID 格式变更、新增 `sessionDir`、`open`、`parseSessionTime` |
+| 修改 | `src/main/java/com/cortex/conversation/Conversation.java` | 回调字段、`fromMessages`、append/replace 末尾触发 |
+| 修改 | `src/test/java/dev/cortex/conversation/ConversationTest.java` | 回调测试 |
+| 修改 | `src/main/java/com/cortex/prompt/Prompt.java` | `buildSystemPrompt` 签名变更 |
+| 修改 | `src/main/java/com/cortex/prompt/Modules.java` | `optionalModules` 接受参数 |
+| 修改 | `src/test/java/dev/cortex/prompt/PromptTest.java` | 新签名测试 |
+| 新建 | `src/main/java/com/cortex/instructions/Loader.java` | Loader 类型、三层加载、@include 展开 |
+| 新建 | `src/test/java/dev/cortex/instructions/LoaderTest.java` | @include 深度/环路/逃逸/缺失文件测试 |
+| 新建 | `src/main/java/com/cortex/session/Entry.java` | JSONL 行 record |
+| 新建 | `src/main/java/com/cortex/session/Writer.java` | Writer、create/open、append |
+| 新建 | `src/main/java/com/cortex/session/SessionInfo.java` | record SessionInfo |
+| 新建 | `src/main/java/com/cortex/session/SessionList.java` | listSessions |
+| 新建 | `src/main/java/com/cortex/session/SessionLoader.java` | load、坏行跳过、孤立截断 |
+| 新建 | `src/main/java/com/cortex/session/SessionCleaner.java` | cleanExpired |
+| 新建 | `src/test/java/dev/cortex/session/SessionTest.java` | JSONL 读写、列表、恢复、清理测试 |
+| 新建 | `src/main/java/com/cortex/memory/NoteType.java` | enum |
+| 新建 | `src/main/java/com/cortex/memory/Note.java` | record |
+| 新建 | `src/main/java/com/cortex/memory/UpdateAction.java` | record |
+| 新建 | `src/main/java/com/cortex/memory/Store.java` | 笔记文件 CRUD、索引读写 |
+| 新建 | `src/main/java/com/cortex/memory/Manager.java` | loadIndex、updateAsync |
+| 新建 | `src/main/java/com/cortex/memory/PromptTemplates.java` | 记忆更新 prompt 模板（中文） |
+| 新建 | `src/test/java/dev/cortex/memory/MemoryTest.java` | 索引加载、操作执行、截断测试 |
+| 修改 | `src/main/java/com/cortex/agent/Agent.java` | `run` 末尾触发记忆更新 |
+| 修改 | `src/main/java/com/cortex/agent/SessionRuntime.java` | `turnCount`、关联 memMgr |
+| 修改 | `src/main/java/com/cortex/tui/Commands.java` | /resume 命令注册 |
+| 新建 | `src/main/java/com/cortex/tui/ResumeStyles.java + MarkdownRenderer.java` | RESUMING、会话列表项、updateResuming |
+| 修改 | `src/main/java/com/cortex/tui/CortexModel.java` | RESUMING 集成、字段新增 |
+| 修改 | `src/main/java/com/cortex/Cortex.java` | 启动流程串联 |
+| 修改 | `.cortex/config.yaml.example` | 配置示例补充说明 |
 
 ## T1: Session ID 格式变更
 
-**文件：** `src/main/java/com/mewcode/compact/SessionContext.java`
+**文件：** `src/main/java/com/cortex/compact/SessionContext.java`
 **依赖：** 无
 **步骤：**
 1. 修改 `newSessionId()`：格式从 `<unix_ts>-<8hex>` 改为 `YYYYMMDD-HHMMSS-<4hex>`。使用 `DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").format(LocalDateTime.now())` 拼接 4 字符随机十六进制（`HexFormat.of().formatHex(SecureRandom).substring(0,4)`）
-2. `SessionContext` 新增 `Path sessionDir` 字段，值为 `workspace.resolve(".mewcode/sessions/").resolve(sessionId)`
+2. `SessionContext` 新增 `Path sessionDir` 字段，值为 `workspace.resolve(".cortex/sessions/").resolve(sessionId)`
 3. 修改 `create(workspace)`：先算 `sessionDir`，`spillDir` 改为 `sessionDir.resolve("tool-results")`
 4. 新增 `open(Path workspace, String sessionId)`：不创建目录，只检查目录存在后填充字段
 5. 新增 `parseSessionTime(String sessionId) throws DateTimeParseException`：从 ID 前 15 位解析 `YYYYMMDD-HHMMSS`，供清理和排序使用
@@ -49,7 +49,7 @@
 
 ## T2: Conversation 回调机制
 
-**文件：** `src/main/java/com/mewcode/conversation/Conversation.java`, `src/test/java/dev/mewcode/conversation/ConversationTest.java`
+**文件：** `src/main/java/com/cortex/conversation/Conversation.java`, `src/test/java/dev/cortex/conversation/ConversationTest.java`
 **依赖：** 无
 **步骤：**
 1. `ConversationManager` 类新增 `Consumer<Message> onAppend` 和 `Consumer<List<Message>> onReplace` 两个可空 final 字段
@@ -63,7 +63,7 @@
 
 ## T3: 项目指令加载器
 
-**文件：** `src/main/java/com/mewcode/instructions/Loader.java`, `src/test/java/dev/mewcode/instructions/LoaderTest.java`
+**文件：** `src/main/java/com/cortex/instructions/Loader.java`, `src/test/java/dev/cortex/instructions/LoaderTest.java`
 **依赖：** 无
 **步骤：**
 1. 定义 `Loader` 类：`Path projectRoot`、`Path userHome`、`int maxDepth = 5`
@@ -82,7 +82,7 @@
 
 ## T4: Session Writer
 
-**文件：** `src/main/java/com/mewcode/session/Entry.java`, `src/main/java/com/mewcode/session/Writer.java`
+**文件：** `src/main/java/com/cortex/session/Entry.java`, `src/main/java/com/cortex/session/Writer.java`
 **依赖：** T1（sessionDir 字段）
 **步骤：**
 1. 定义 `Entry` record，使用 Jackson 注解（`@JsonInclude(JsonInclude.Include.NON_NULL)`，字段名走 `@JsonProperty`：`tool_calls`、`tool_results`、`ts`、`model`）
@@ -97,7 +97,7 @@
 
 ## T5: 会话列表扫描
 
-**文件：** `src/main/java/com/mewcode/session/SessionInfo.java`, `src/main/java/com/mewcode/session/SessionList.java`
+**文件：** `src/main/java/com/cortex/session/SessionInfo.java`, `src/main/java/com/cortex/session/SessionList.java`
 **依赖：** T1（parseSessionTime）
 **步骤：**
 1. 定义 `SessionInfo` record（含 `id`、`title`、`modifiedAt`、`model`、`size`、`dir`）
@@ -114,7 +114,7 @@
 
 ## T6: 会话加载恢复
 
-**文件：** `src/main/java/com/mewcode/session/SessionLoader.java`
+**文件：** `src/main/java/com/cortex/session/SessionLoader.java`
 **依赖：** T4（Entry）
 **步骤：**
 1. 实现 `SessionLoader.load(Path sessionDir)`：
@@ -130,7 +130,7 @@
 
 ## T7: 会话过期清理
 
-**文件：** `src/main/java/com/mewcode/session/SessionCleaner.java`
+**文件：** `src/main/java/com/cortex/session/SessionCleaner.java`
 **依赖：** T1（parseSessionTime）
 **步骤：**
 1. 实现 `SessionCleaner.cleanExpired(Path sessionsDir, Duration maxAge)`：
@@ -143,7 +143,7 @@
 
 ## T8: Session 包测试
 
-**文件：** `src/test/java/dev/mewcode/session/SessionTest.java`
+**文件：** `src/test/java/dev/cortex/session/SessionTest.java`
 **依赖：** T4, T5, T6, T7
 **步骤：**
 1. `appendAndRead`：写入 3 条消息 → 逐行读回验证 JSON 结构
@@ -158,7 +158,7 @@
 
 ## T9: 笔记类型与存储
 
-**文件：** `src/main/java/com/mewcode/memory/NoteType.java`, `Note.java`, `UpdateAction.java`, `Store.java`
+**文件：** `src/main/java/com/cortex/memory/NoteType.java`, `Note.java`, `UpdateAction.java`, `Store.java`
 **依赖：** 无
 **步骤：**
 1. `NoteType` enum：包含四个常量；`wire()` 返回 snake_case 名；`fromWire(String)` 反查
@@ -177,7 +177,7 @@
 
 ## T10: 记忆管理器
 
-**文件：** `src/main/java/com/mewcode/memory/Manager.java`, `PromptTemplates.java`
+**文件：** `src/main/java/com/cortex/memory/Manager.java`, `PromptTemplates.java`
 **依赖：** T9
 **步骤：**
 1. `PromptTemplates`：定义记忆更新的系统提示常量（中文），包含规则说明和 JSON 输出格式
@@ -198,7 +198,7 @@
 
 ## T11: Memory 包测试
 
-**文件：** `src/test/java/dev/mewcode/memory/MemoryTest.java`
+**文件：** `src/test/java/dev/cortex/memory/MemoryTest.java`
 **依赖：** T9, T10
 **步骤：**
 1. `storeCreateNote`：`apply` create → 文件存在、frontmatter 正确、MEMORY.md 有对应行
@@ -212,7 +212,7 @@
 
 ## T12: buildSystemPrompt 参数化
 
-**文件：** `src/main/java/com/mewcode/prompt/Prompt.java`, `Modules.java`, `src/test/java/dev/mewcode/prompt/PromptTest.java`
+**文件：** `src/main/java/com/cortex/prompt/Prompt.java`, `Modules.java`, `src/test/java/dev/cortex/prompt/PromptTest.java`
 **依赖：** 无
 **步骤：**
 1. `Modules.optionalModules(String instructions, String memory)`：用参数填充对应 `Module.content`
@@ -224,20 +224,20 @@
 
 ## T13: /resume 命令注册
 
-**文件：** `src/main/java/com/mewcode/tui/Commands.java`
+**文件：** `src/main/java/com/cortex/tui/Commands.java`
 **依赖：** 无
 **步骤：**
 1. 在 `BUILTIN_COMMANDS` Map 中注册 `"/resume"` → `Commands::handleResume`
-2. `handleResume(MewCodeModel app)`：检查 `app.state() == SessionState.IDLE`，调用 `app.beginResume()`
+2. `handleResume(CortexModel app)`：检查 `app.state() == SessionState.IDLE`，调用 `app.beginResume()`
 
 **验证：** `./gradlew shadowJar` 编译通过
 
 ## T14: 会话列表 UI
 
-**文件：** `src/main/java/com/mewcode/tui/ResumeStyles.java + MarkdownRenderer.java`, `MewCodeModel.java`
+**文件：** `src/main/java/com/cortex/tui/ResumeStyles.java + MarkdownRenderer.java`, `CortexModel.java`
 **依赖：** T5（SessionList）, T13
 **步骤：**
-1. `MewCodeModel`：
+1. `CortexModel`：
    - `SessionState` enum 新增 `RESUMING`
    - 新增字段：`Writer writer`、`Manager memMgr`、`String instructionText`、`String memoryText`、`Path sessionsDir`
    - 构造扩展：接收 writer、memMgr、instructionText、memoryText
@@ -255,14 +255,14 @@
      - `Conversation.fromMessages(...)` → 新 conv
      - `SessionContext.open(root, info.id())` → 新 sesCtx
      - `Writer.open(info.dir())` → 新 writer
-     - 替换 MewCodeModel 的 conv、writer、sesCtx、runtime.session
+     - 替换 CortexModel 的 conv、writer、sesCtx、runtime.session
      - scrollback 追加系统消息
 
 **验证：** `./gradlew shadowJar` 编译通过
 
 ## T15: Agent 记忆更新触发
 
-**文件：** `src/main/java/com/mewcode/agent/Agent.java`, `SessionRuntime.java`
+**文件：** `src/main/java/com/cortex/agent/Agent.java`, `SessionRuntime.java`
 **依赖：** T10（Manager）
 **步骤：**
 1. `SessionRuntime`：新增 `long turnCount`；`Agent.Builder` 新增 `memoryManager(Manager)`、`instructionText(String)`、`memoryText(String)`
@@ -278,7 +278,7 @@
 
 ## T16: Main 启动流程串联
 
-**文件：** `src/main/java/com/mewcode/MewCode.java`
+**文件：** `src/main/java/com/cortex/Cortex.java`
 **依赖：** T1, T2, T3, T4, T10, T12, T14, T15
 **步骤：**
 1. 在 `ConfigLoader.load` 之后、`ToolToolRegistry.createDefault()` 之前插入：
@@ -291,14 +291,14 @@
    - `Thread.startVirtualThread(() -> SessionCleaner.cleanExpired(sessionsDir, Duration.ofDays(30)));`
 4. 修改 `new Conversation()` → `new Conversation(writer::onAppend, writer::onReplace)`
    其中 `writer.onAppend(Message)` / `writer.onReplace(List<Message>)` 是 Writer 上的实例方法，内部委派 `append`/`writeCompactMarker` + `appendAll`
-5. 修改 `new MewCodeModel(...)` 调用：传入 writer、memMgr、instructionText、memoryText
-6. 在 MewCodeModel 的 provider 选定回调中：调 `memMgr.setProvider(provider, model)`
+5. 修改 `new CortexModel(...)` 调用：传入 writer、memMgr、instructionText、memoryText
+6. 在 CortexModel 的 provider 选定回调中：调 `memMgr.setProvider(provider, model)`
 
 **验证：** `./gradlew shadowJar` 编译通过；`./gradlew -q spotless:check` 无错
 
 ## T17: 配置示例更新
 
-**文件：** `.mewcode/config.yaml.example`
+**文件：** `.cortex/config.yaml.example`
 **依赖：** 无
 **步骤：**
 1. 在配置示例中添加注释，说明 MEWCODE.md 的加载路径和优先级

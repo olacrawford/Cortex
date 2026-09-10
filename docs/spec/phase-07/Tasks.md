@@ -6,62 +6,62 @@
 
 | 文件路径 | 类型 | 职责 |
 |----------|------|------|
-| `src/main/java/com/mewcode/compact/CompactConstants.java` | 新建 | 全部硬编码常量 |
-| `src/main/java/com/mewcode/compact/state/ContentReplacementState.java` | 新建 | `ContentReplacementState`(含 `decideOnce`)、`Decision` 枚举、`DecisionResult` record |
-| `src/main/java/com/mewcode/compact/state/AutoCompactTrackingState.java` | 新建 | 熔断计数器 |
-| `src/main/java/com/mewcode/compact/state/SessionContext.java` | 新建 | `SessionContext` record + `create(Path)` |
-| `src/main/java/com/mewcode/compact/Recovery.java` | 新建 | `RecoveryState` / `FileReadRecord` / `buildRecoveryAttachment` / `renderFileBlock` / `renderToolsBlock` / `BOUNDARY_NOTICE` |
-| `src/main/java/com/mewcode/compact/Token.java` | 新建 | `estimateTokens` / `usageAnchor` / `messageChars` |
-| `src/main/java/com/mewcode/compact/// (Layer 1/2 都在 ContextCompactor.java 内)` | 新建 | `offloadAndSnip` / `spillSingle` / `buildPreview` |
-| `src/main/java/com/mewcode/compact/SummaryPrompt.java` | 新建 | `buildSummaryPrompt` / `serializeConversation` / `extractSummary` / 9 部分模板 |
-| `src/main/java/com/mewcode/compact/// (Layer 1/2 都在 ContextCompactor.java 内)` | 新建 | `autoCompact` / `forceCompact` / `runSummary` / `summarizeOnce` / `ptlRetry` / `pickRecentTail` / `groupByUserTurn` |
-| `src/main/java/com/mewcode/compact/ContextCompactor.java` | 新建 | `manageContext` / `TriggerKind` 枚举 / 编排 |
-| `src/main/java/com/mewcode/compact/CompactException.java` | 新建 | checked exception 基类 |
-| `src/main/java/com/mewcode/compact/PromptTooLongException.java` | 新建 | 摘要 PTL 异常(若 llm 包未提供) |
-| `src/test/java/dev/mewcode/compact/*Test.java` | 新建 | 各文件对应单测(JUnit 5) |
-| `src/main/java/com/mewcode/llm/PromptTooLongException.java` | 新建 | `LlmException` 子类,作为 PTL 哨兵 |
-| `src/main/java/com/mewcode/llm/AnthropicProvider.java` | 修改 | 把 provider 上下文过长错误包装成 `PromptTooLongException` 并通过 `AgentEvent.ErrorEvent` 投递 |
-| `src/main/java/com/mewcode/llm/OpenAIProvider.java` | 修改 | 同上 |
-| `src/test/java/dev/mewcode/llm/AnthropicProviderTest.java` | 修改/新建 | PTL 错误包装单测 |
-| `src/test/java/dev/mewcode/llm/OpenAIProviderTest.java` | 修改/新建 | PTL 错误包装单测 |
-| `src/main/java/com/mewcode/conversation/Conversation.java` | 修改 | 加 `ReentrantLock lock`;新增 `replaceMessages(msgs)` 深拷贝整体替换 |
-| `src/test/java/dev/mewcode/conversation/ConversationTest.java` | 修改 | 增加 `replaceMessages` 用例 |
-| `src/main/java/com/mewcode/config/ProviderConfig.java` | 修改 | record 追加 `int contextWindow` + `effectiveContextWindow()` |
-| `src/main/java/com/mewcode/config/ProtocolDefaults.java` | 新建 | `DEFAULT_ANTHROPIC_CONTEXT_WINDOW` / `DEFAULT_OPENAI_CONTEXT_WINDOW` 协议默认值常量 |
-| `src/test/java/dev/mewcode/config/ConfigLoaderTest.java` | 修改 | 4 种情况断言 + 加载 `.mewcode/config.yaml.example` 通过的解析测试 |
-| `src/main/java/com/mewcode/agent/SessionRuntime.java` | 新建 | `SessionRuntime` 类 + Builder 整合 |
-| `src/main/java/com/mewcode/agent/Agent.java` | 修改 | `Agent.builder().runtime(...)`;streamOnce 签名抛 `StreamException`;主循环集成 compact、ReadFile 追踪、PTL 紧急压缩、`runForceCompact`、`runLock` 互斥锁 |
-| `src/main/java/com/mewcode/agent/CompactEvent.java` | 新建 | `CompactPhase` 枚举 + `CompactEvent` record(实现 `AgentEvent`) |
-| `src/test/java/dev/mewcode/agent/AgentTest.java` | 修改 | FakeProvider 扩展 + 紧急压缩两用例 |
-| `src/main/java/com/mewcode/tui/Commands.java` | 新建 | 命令分发 + `/exit` / `/plan` / `/do` / `/compact` 处理器 + 未知命令兜底 |
-| `src/main/java/com/mewcode/tui/MewCodeModel.java` | 修改 | 新增 `SessionRuntime runtime` 与 `Agent agent` 字段;构造期一次性构造 Agent;`submit()` 内原 switch 改用 `dispatchCommand` |
-| `src/main/java/com/mewcode/tui/AgentEvent 队列.java` | 修改 | `onNext` 中新增 `CompactEvent` 分支,渲染状态提示 |
-| `src/test/java/dev/mewcode/tui/MewCodeModelTest.java` | 修改 | 5 组用例:`/compact` 路由到命令分发、`/unknown` 友好提示、迁移后 `/exit` / `/plan` / `/do` 各一组不回归 |
-| `src/main/java/com/mewcode/MewCode.java` | 修改 | 启动期构造 SessionRuntime 注入 MewCodeModel;待 provider 选定后再注入 contextWindow |
-| `src/main/java/com/mewcode/smoke/SmokeMewCode.java` | 修改 | 按新 Agent 构造签名传入 SessionRuntime(smoke 场景 contextWindow=200000) |
-| `.mewcode/config.yaml.example` | 修改 | 新增 `context_window` 字段示例与注释 |
-| `.gitignore` | 修改 | 追加 `.mewcode/sessions/` |
+| `src/main/java/com/cortex/compact/CompactConstants.java` | 新建 | 全部硬编码常量 |
+| `src/main/java/com/cortex/compact/state/ContentReplacementState.java` | 新建 | `ContentReplacementState`(含 `decideOnce`)、`Decision` 枚举、`DecisionResult` record |
+| `src/main/java/com/cortex/compact/state/AutoCompactTrackingState.java` | 新建 | 熔断计数器 |
+| `src/main/java/com/cortex/compact/state/SessionContext.java` | 新建 | `SessionContext` record + `create(Path)` |
+| `src/main/java/com/cortex/compact/Recovery.java` | 新建 | `RecoveryState` / `FileReadRecord` / `buildRecoveryAttachment` / `renderFileBlock` / `renderToolsBlock` / `BOUNDARY_NOTICE` |
+| `src/main/java/com/cortex/compact/Token.java` | 新建 | `estimateTokens` / `usageAnchor` / `messageChars` |
+| `src/main/java/com/cortex/compact/// (Layer 1/2 都在 ContextCompactor.java 内)` | 新建 | `offloadAndSnip` / `spillSingle` / `buildPreview` |
+| `src/main/java/com/cortex/compact/SummaryPrompt.java` | 新建 | `buildSummaryPrompt` / `serializeConversation` / `extractSummary` / 9 部分模板 |
+| `src/main/java/com/cortex/compact/// (Layer 1/2 都在 ContextCompactor.java 内)` | 新建 | `autoCompact` / `forceCompact` / `runSummary` / `summarizeOnce` / `ptlRetry` / `pickRecentTail` / `groupByUserTurn` |
+| `src/main/java/com/cortex/compact/ContextCompactor.java` | 新建 | `manageContext` / `TriggerKind` 枚举 / 编排 |
+| `src/main/java/com/cortex/compact/CompactException.java` | 新建 | checked exception 基类 |
+| `src/main/java/com/cortex/compact/PromptTooLongException.java` | 新建 | 摘要 PTL 异常(若 llm 包未提供) |
+| `src/test/java/dev/cortex/compact/*Test.java` | 新建 | 各文件对应单测(JUnit 5) |
+| `src/main/java/com/cortex/llm/PromptTooLongException.java` | 新建 | `LlmException` 子类,作为 PTL 哨兵 |
+| `src/main/java/com/cortex/llm/AnthropicProvider.java` | 修改 | 把 provider 上下文过长错误包装成 `PromptTooLongException` 并通过 `AgentEvent.ErrorEvent` 投递 |
+| `src/main/java/com/cortex/llm/OpenAIProvider.java` | 修改 | 同上 |
+| `src/test/java/dev/cortex/llm/AnthropicProviderTest.java` | 修改/新建 | PTL 错误包装单测 |
+| `src/test/java/dev/cortex/llm/OpenAIProviderTest.java` | 修改/新建 | PTL 错误包装单测 |
+| `src/main/java/com/cortex/conversation/Conversation.java` | 修改 | 加 `ReentrantLock lock`;新增 `replaceMessages(msgs)` 深拷贝整体替换 |
+| `src/test/java/dev/cortex/conversation/ConversationTest.java` | 修改 | 增加 `replaceMessages` 用例 |
+| `src/main/java/com/cortex/config/ProviderConfig.java` | 修改 | record 追加 `int contextWindow` + `effectiveContextWindow()` |
+| `src/main/java/com/cortex/config/ProtocolDefaults.java` | 新建 | `DEFAULT_ANTHROPIC_CONTEXT_WINDOW` / `DEFAULT_OPENAI_CONTEXT_WINDOW` 协议默认值常量 |
+| `src/test/java/dev/cortex/config/ConfigLoaderTest.java` | 修改 | 4 种情况断言 + 加载 `.cortex/config.yaml.example` 通过的解析测试 |
+| `src/main/java/com/cortex/agent/SessionRuntime.java` | 新建 | `SessionRuntime` 类 + Builder 整合 |
+| `src/main/java/com/cortex/agent/Agent.java` | 修改 | `Agent.builder().runtime(...)`;streamOnce 签名抛 `StreamException`;主循环集成 compact、ReadFile 追踪、PTL 紧急压缩、`runForceCompact`、`runLock` 互斥锁 |
+| `src/main/java/com/cortex/agent/CompactEvent.java` | 新建 | `CompactPhase` 枚举 + `CompactEvent` record(实现 `AgentEvent`) |
+| `src/test/java/dev/cortex/agent/AgentTest.java` | 修改 | FakeProvider 扩展 + 紧急压缩两用例 |
+| `src/main/java/com/cortex/tui/Commands.java` | 新建 | 命令分发 + `/exit` / `/plan` / `/do` / `/compact` 处理器 + 未知命令兜底 |
+| `src/main/java/com/cortex/tui/CortexModel.java` | 修改 | 新增 `SessionRuntime runtime` 与 `Agent agent` 字段;构造期一次性构造 Agent;`submit()` 内原 switch 改用 `dispatchCommand` |
+| `src/main/java/com/cortex/tui/AgentEvent 队列.java` | 修改 | `onNext` 中新增 `CompactEvent` 分支,渲染状态提示 |
+| `src/test/java/dev/cortex/tui/CortexModelTest.java` | 修改 | 5 组用例:`/compact` 路由到命令分发、`/unknown` 友好提示、迁移后 `/exit` / `/plan` / `/do` 各一组不回归 |
+| `src/main/java/com/cortex/Cortex.java` | 修改 | 启动期构造 SessionRuntime 注入 CortexModel;待 provider 选定后再注入 contextWindow |
+| `src/main/java/com/cortex/smoke/SmokeCortex.java` | 修改 | 按新 Agent 构造签名传入 SessionRuntime(smoke 场景 contextWindow=200000) |
+| `.cortex/config.yaml.example` | 修改 | 新增 `context_window` 字段示例与注释 |
+| `.gitignore` | 修改 | 追加 `.cortex/sessions/` |
 
 ---
 
 ## T1 - 建立 compact 包骨架与常量
 
-- **文件**:`src/main/java/com/mewcode/compact/CompactConstants.java`
+- **文件**:`src/main/java/com/cortex/compact/CompactConstants.java`
 - **依赖**:无
 - **步骤**:
-  1. 新建目录 `src/main/java/com/mewcode/compact/`。
-  2. 在 `CompactConstants.java` 顶部声明 `package com.mewcode.compact;`。
+  1. 新建目录 `src/main/java/com/cortex/compact/`。
+  2. 在 `CompactConstants.java` 顶部声明 `package com.cortex.compact;`。
   3. 定义全部硬编码常量(`public static final`):`SINGLE_RESULT_LIMIT = 50000`、`MESSAGE_AGGREGATE_LIMIT = 200000`、`SUMMARY_RESERVE = 20000`、`AUTO_SAFETY_MARGIN = 13000`、`MANUAL_SAFETY_MARGIN = 3000`、`RECOVERY_FILE_LIMIT = 5`、`RECOVERY_TOKENS_PER_FILE = 5000`、`RECENT_KEEP_TOKENS = 10000`、`RECENT_KEEP_MESSAGES = 5`、`MAX_CONSECUTIVE_AUTO_COMPACT_FAILURES = 3`、`PTL_RETRY_LIMIT = 3`、`PTL_DROP_PERCENTAGE = 0.2`、`ESTIMATE_CHARS_PER_TOKEN = 3.5`、`PREVIEW_HEAD_BYTES = 2048`、`PREVIEW_HEAD_LINES = 20`。
-  4. 类声明 `private CompactConstants() {}`,防止误实例化。协议默认值常量定义在 `com.mewcode.config.ProtocolDefaults`(见 T24),**不**放本类。
+  4. 类声明 `private CompactConstants() {}`,防止误实例化。协议默认值常量定义在 `com.cortex.config.ProtocolDefaults`(见 T24),**不**放本类。
   5. 每个常量上方写一行简短中文注释,说明数字含义。注释不写"参考"、"取自"等外部引用语。
 - **验证**:`./gradlew -q -pl . -am compile -DskipTests` 通过;`./gradlew -q spotless:check` 干净。
 
 ## T2 - SessionContext 与目录创建
 
-- **文件**:`src/main/java/com/mewcode/compact/state/SessionContext.java`
+- **文件**:`src/main/java/com/cortex/compact/state/SessionContext.java`
 - **依赖**:T1
 - **步骤**:
-  1. 创建 `state/SessionContext.java`,包声明 `package com.mewcode.compact.state;`。
+  1. 创建 `state/SessionContext.java`,包声明 `package com.cortex.compact.state;`。
   2. 定义 `public record SessionContext(String sessionId, Path spillDir)`。
   3. 实现包内静态方法 `private static String newSessionId()`:
      - 用 `SecureRandom.getInstanceStrong()` 取 4 字节;失败时降级为 `new SplittableRandom(System.nanoTime())` 取 4 字节 fallback,并写一条 `java.util.logging.Logger.warning` 日志。
@@ -69,7 +69,7 @@
      - 返回 `Instant.now().getEpochSecond() + "-" + hex`。
   4. 实现 `public static SessionContext create(Path workspace) throws IOException`:
      - 调 `newSessionId()` 拿到 sessionId(不会 panic,SecureRandom 不可用时自动降级)。
-     - 拼接 `spillDir = workspace.resolve(".mewcode/sessions").resolve(sessionId).resolve("tool-results")`。
+     - 拼接 `spillDir = workspace.resolve(".cortex/sessions").resolve(sessionId).resolve("tool-results")`。
      - 调 `Files.createDirectories(spillDir)`;目录已存在不算错误(`createDirectories` 本身幂等)。
      - 返回 `new SessionContext(sessionId, spillDir)`。
   5. import 顺序遵循 google-java-format:JDK 标准库一组、第三方一组、本地包一组。
@@ -77,7 +77,7 @@
 
 ## T3 - ContentReplacementState 与 AutoCompactTrackingState
 
-- **文件**:`src/main/java/com/mewcode/compact/state/ContentReplacementState.java` + `AutoCompactTrackingState.java`
+- **文件**:`src/main/java/com/cortex/compact/state/ContentReplacementState.java` + `AutoCompactTrackingState.java`
 - **依赖**:T2
 - **步骤**:
   1. 在 `ContentReplacementState.java` 中定义类:
@@ -137,7 +137,7 @@
 
 ## T4 - RecoveryState 与 FileReadRecord
 
-- **文件**:`src/main/java/com/mewcode/compact/Recovery.java`
+- **文件**:`src/main/java/com/cortex/compact/Recovery.java`
 - **依赖**:T3
 - **步骤**:
   1. 在同文件内定义 `public record FileReadRecord(String path, String content, Instant timestamp)`。
@@ -148,10 +148,10 @@
 
 ## T5 - estimateTokens 与 usageAnchor
 
-- **文件**:`src/main/java/com/mewcode/compact/Token.java`
+- **文件**:`src/main/java/com/cortex/compact/Token.java`
 - **依赖**:T1
 - **步骤**:
-  1. 新建 `Token.java`,包声明 `package com.mewcode.compact;`。
+  1. 新建 `Token.java`,包声明 `package com.cortex.compact;`。
   2. 定义 `public final class Token { private Token() {} ... }`。
   3. 实现 `public static long usageAnchor(Usage u)`:返回 `u.inputTokens() + u.outputTokens() + u.cacheRead() + u.cacheWrite()`(假设 Usage 是 record,字段为 long,避免溢出)。
   4. 实现包内 `static int messageChars(List<Message> msgs)`:遍历每条 message,累加 `content.getBytes(UTF_8).length` + 每个 `toolCalls.get(i).input` 字节长度(注意字段名是 `input`,类型 `JsonNode` 或 `String`)+ 每个 `toolResults.get(i).content` 长度。考虑 null 安全。
@@ -164,10 +164,10 @@
 
 ## T6 - 单条工具结果落盘 spillSingle
 
-- **文件**:`src/main/java/com/mewcode/compact/// (Layer 1/2 都在 ContextCompactor.java 内)`
+- **文件**:`src/main/java/com/cortex/compact/// (Layer 1/2 都在 ContextCompactor.java 内)`
 - **依赖**:T2
 - **步骤**:
-  1. 新建 `// (Layer 1/2 都在 ContextCompactor.java 内)`,包声明 `package com.mewcode.compact;`。
+  1. 新建 `// (Layer 1/2 都在 ContextCompactor.java 内)`,包声明 `package com.cortex.compact;`。
   2. 实现包内 `static void spillSingle(SessionContext session, String toolUseId, String content) throws IOException`:
      - 拼接 `Path path = session.spillDir().resolve(toolUseId)`。
      - 用 `Files.exists(path)` 判断文件已存在则直接返回(幂等)。
@@ -177,7 +177,7 @@
 
 ## T7 - 预览体构造 buildPreview
 
-- **文件**:`src/main/java/com/mewcode/compact/// (Layer 1/2 都在 ContextCompactor.java 内)`
+- **文件**:`src/main/java/com/cortex/compact/// (Layer 1/2 都在 ContextCompactor.java 内)`
 - **依赖**:T6
 - **步骤**:
   1. 实现 `static String headPreview(String content)`:先按 `\n` 分成最多 `PREVIEW_HEAD_LINES` 行(`String.split("\n", PREVIEW_HEAD_LINES + 1)` 后丢掉最后一段并 join),再用 `byte[] bytes = head.getBytes(UTF_8); if (bytes.length > PREVIEW_HEAD_BYTES) { head = new String(bytes, 0, PREVIEW_HEAD_BYTES, UTF_8); }` 二次裁剪。
@@ -192,12 +192,12 @@
 
 ## T8 - offloadAndSnip 主体
 
-- **文件**:`src/main/java/com/mewcode/compact/// (Layer 1/2 都在 ContextCompactor.java 内)`
+- **文件**:`src/main/java/com/cortex/compact/// (Layer 1/2 都在 ContextCompactor.java 内)`
 - **依赖**:T3、T7
 - **步骤**:
   1. 实现 `public static List<Message> offloadAndSnip(List<Message> msgs, ContentReplacementState state, SessionContext session)`。
   2. 先深拷贝 msgs 到 `out`:`new ArrayList<>(msgs)` 后逐条复制每条 message 的 `toolResults` 列表(避免改原列表)。
-  3. 关键约束:仅遍历 `Role == RoleTool` 的消息(mewcode 把一轮工具结果挂在 RoleTool 消息的 `toolResults` 列表里,**不**在 assistant 消息里)。对每条 RoleTool 消息独立处理其 `toolResults` 列表。
+  3. 关键约束:仅遍历 `Role == RoleTool` 的消息(cortex 把一轮工具结果挂在 RoleTool 消息的 `toolResults` 列表里,**不**在 assistant 消息里)。对每条 RoleTool 消息独立处理其 `toolResults` 列表。
   4. 单遍扫描 + 候选列表处理(决策只走一次):
      - 对当前 RoleTool 消息的 toolResults 建立候选列表 `candidates`:先用 `state.decideOnce(id, content, () -> new DecisionResult(Decision.KEPT, null))` 探测已经决策过的项(账本会返回正确结果——KEPT 返回原 content、REPLACED 返回 preview),把这些项直接落到 `out` 对应位置;剩下未决策的项进入 `candidates`。
        注意:对已 Seen 项不允许重新调用 buildPreview,decideOnce 内部会复用 replacements[id]。
@@ -226,7 +226,7 @@
 
 ## T9 - 摘要 Prompt 模板与解析
 
-- **文件**:`src/main/java/com/mewcode/compact/SummaryPrompt.java`
+- **文件**:`src/main/java/com/cortex/compact/SummaryPrompt.java`
 - **依赖**:T1
 - **步骤**:
   1. 新建 `SummaryPrompt.java`,包声明同 T1。
@@ -245,7 +245,7 @@
 
 ## T10 - BOUNDARY_NOTICE 与单文件 / 工具 block 渲染
 
-- **文件**:`src/main/java/com/mewcode/compact/Recovery.java`
+- **文件**:`src/main/java/com/cortex/compact/Recovery.java`
 - **依赖**:T4
 - **步骤**:
   1. 在 `Recovery.java` 中追加:`public static final String BOUNDARY_NOTICE = """..."""`(text block):固定文案,明确告诉模型"需要文件原文、错误原文、用户原话时请使用文件读取工具重读对应路径,不要依据摘要内容做猜测"。
@@ -259,7 +259,7 @@
 
 ## T11 - buildRecoveryAttachment 三段拼接
 
-- **文件**:`src/main/java/com/mewcode/compact/Recovery.java`
+- **文件**:`src/main/java/com/cortex/compact/Recovery.java`
 - **依赖**:T10
 - **步骤**:
   1. 实现 `public static String buildRecoveryAttachment(List<FileReadRecord> snapshot, List<Map<String, Object>/*tool schema*/> toolDefs)`:
@@ -275,7 +275,7 @@
 
 ## T12 - 近期原文 pickRecentTail + 配对修正
 
-- **文件**:`src/main/java/com/mewcode/compact/// (Layer 1/2 都在 ContextCompactor.java 内)`
+- **文件**:`src/main/java/com/cortex/compact/// (Layer 1/2 都在 ContextCompactor.java 内)`
 - **依赖**:T5
 - **步骤**:
   1. 新建 `// (Layer 1/2 都在 ContextCompactor.java 内)`,包声明同 T1。
@@ -289,7 +289,7 @@
 
 ## T12a - pickRecentTail 起点 role 衔接修正
 
-- **文件**:`src/main/java/com/mewcode/compact/// (Layer 1/2 都在 ContextCompactor.java 内)`
+- **文件**:`src/main/java/com/cortex/compact/// (Layer 1/2 都在 ContextCompactor.java 内)`
 - **依赖**:T12
 - **步骤**:
   1. 实现包内 `static List<Message> joinAfterSummary(Message summaryAndRecovery, List<Message> recent)`:
@@ -303,7 +303,7 @@
 
 ## T13 - groupByUserTurn 分组
 
-- **文件**:`src/main/java/com/mewcode/compact/// (Layer 1/2 都在 ContextCompactor.java 内)`
+- **文件**:`src/main/java/com/cortex/compact/// (Layer 1/2 都在 ContextCompactor.java 内)`
 - **依赖**:T12
 - **步骤**:
   1. 实现 `static List<List<Message>> groupByUserTurn(List<Message> msgs)`:
@@ -315,7 +315,7 @@
 
 ## T14 - summarizeOnce 单次摘要请求
 
-- **文件**:`src/main/java/com/mewcode/compact/// (Layer 1/2 都在 ContextCompactor.java 内)`
+- **文件**:`src/main/java/com/cortex/compact/// (Layer 1/2 都在 ContextCompactor.java 内)`
 - **依赖**:T9、T12
 - **步骤**:
   1. 实现 `static String summarizeOnce(ContextCompactor.// (参数直接传入 manage 方法) in, List<Message> msgs) throws PromptTooLongException, IOException`:
@@ -327,7 +327,7 @@
 
 ## T15 - ptlRetry 摘要请求自重试
 
-- **文件**:`src/main/java/com/mewcode/compact/// (Layer 1/2 都在 ContextCompactor.java 内)`
+- **文件**:`src/main/java/com/cortex/compact/// (Layer 1/2 都在 ContextCompactor.java 内)`
 - **依赖**:T13、T14
 - **步骤**:
   1. 实现 `static String ptlRetry(ContextCompactor.// (参数直接传入 manage 方法) in, List<Message> msgs, Throwable firstErr) throws CompactException, IOException`:
@@ -340,7 +340,7 @@
 
 ## T16 - runSummary 摘要 + 恢复 + 近期原文拼接
 
-- **文件**:`src/main/java/com/mewcode/compact/// (Layer 1/2 都在 ContextCompactor.java 内)`
+- **文件**:`src/main/java/com/cortex/compact/// (Layer 1/2 都在 ContextCompactor.java 内)`
 - **依赖**:T11、T12a、T14、T15
 - **步骤**:
   1. 实现 `static List<Message> runSummary(ContextCompactor.// (参数直接传入 manage 方法) in) throws CompactException`:
@@ -360,7 +360,7 @@
 
 ## T17 - autoCompact 与 forceCompact
 
-- **文件**:`src/main/java/com/mewcode/compact/// (Layer 1/2 都在 ContextCompactor.java 内)`
+- **文件**:`src/main/java/com/cortex/compact/// (Layer 1/2 都在 ContextCompactor.java 内)`
 - **依赖**:T16、T3
 - **步骤**:
   1. 实现 `public static CompactResult autoCompact(ContextCompactor.// (参数直接传入 manage 方法) in) throws CompactException`:
@@ -374,7 +374,7 @@
 
 ## T18 - manageContext 编排入口
 
-- **文件**:`src/main/java/com/mewcode/compact/ContextCompactor.java`
+- **文件**:`src/main/java/com/cortex/compact/ContextCompactor.java`
 - **依赖**:T8、T17
 - **步骤**:
   1. 新建 `ContextCompactor.java`,包声明同 T1。
@@ -395,17 +395,17 @@
 
 ## T19 - PromptTooLongException 哨兵
 
-- **文件**:`src/main/java/com/mewcode/llm/PromptTooLongException.java`
+- **文件**:`src/main/java/com/cortex/llm/PromptTooLongException.java`
 - **依赖**:无
 - **步骤**:
-  1. 新建 `PromptTooLongException.java`,包声明 `package com.mewcode.llm;`。
+  1. 新建 `PromptTooLongException.java`,包声明 `package com.cortex.llm;`。
   2. 定义 `public class PromptTooLongException extends LlmException { public PromptTooLongException(Throwable cause) { super("prompt too long for context window", cause); } }`(若 `LlmException` 不存在,则继承 `IOException` 或新建一个 `LlmException extends Exception` 基类)。
-  3. `Map<String, Object>/*tool schema*/` 已是公开 record(见 com.mewcode.llm.Map<String, Object>/*tool schema*/)且字段 `name` / `description` / `inputSchema` 都已公开,本任务**不**改名、**不**新增公开动作。
-- **验证**:编译通过;`grep -rn PromptTooLongException src/main/java/com/mewcode/llm/` 命中。
+  3. `Map<String, Object>/*tool schema*/` 已是公开 record(见 com.cortex.llm.Map<String, Object>/*tool schema*/)且字段 `name` / `description` / `inputSchema` 都已公开,本任务**不**改名、**不**新增公开动作。
+- **验证**:编译通过;`grep -rn PromptTooLongException src/main/java/com/cortex/llm/` 命中。
 
 ## T20 - Anthropic / OpenAI provider PTL 错误包装
 
-- **文件**:`src/main/java/com/mewcode/llm/AnthropicProvider.java` / `OpenAIProvider.java`
+- **文件**:`src/main/java/com/cortex/llm/AnthropicProvider.java` / `OpenAIProvider.java`
 - **依赖**:T19
 - **步骤**:
   1. AnthropicProvider 错误分支:检测原始错误是否符合"上下文过长"特征(HTTP 状态 400 且响应体含 `prompt is too long`,或错误类型 `invalid_request_error` 且消息含 `context_length`)。命中时 `Throwable wrapped = new PromptTooLongException(origErr)`,通过 `publisher.submit(new AgentEvent.ErrorEvent(wrapped))` 投递到事件流(`Provider.stream` 接口签名只返回 `BlockingQueue`,无 throws,PTL 错误必须以 `AgentEvent.ErrorEvent` 形式发出)。
@@ -415,7 +415,7 @@
 
 ## T20.5 - Anthropic / OpenAI provider PTL 错误包装单测
 
-- **文件**:`src/test/java/dev/mewcode/llm/AnthropicProviderTest.java` / `OpenAIProviderTest.java`
+- **文件**:`src/test/java/dev/cortex/llm/AnthropicProviderTest.java` / `OpenAIProviderTest.java`
 - **依赖**:T20
 - **步骤**:
   1. 注入构造好的错误返回(mock OkHttpClient 或注入预构造错误对象)。
@@ -424,7 +424,7 @@
 
 ## T21 - Conversation.replaceMessages + 并发安全
 
-- **文件**:`src/main/java/com/mewcode/conversation/Conversation.java`
+- **文件**:`src/main/java/com/cortex/conversation/Conversation.java`
 - **依赖**:无
 - **步骤**:
   1. 给 `ConversationManager` 类新增 `private final ReentrantLock lock = new ReentrantLock()` 字段(当前 Conversation 没有 lock)。
@@ -437,10 +437,10 @@
 
 ## T22 - compact 包单元测试
 
-- **文件**:`src/test/java/dev/mewcode/compact/StateTest.java` / `Layer1Test.java` / `SummaryPromptTest.java` / `RecoveryTest.java` / `TokenTest.java` / `Layer2Test.java` / `CompactTest.java` / `support/FakeCompactProvider.java`
+- **文件**:`src/test/java/dev/cortex/compact/StateTest.java` / `Layer1Test.java` / `SummaryPromptTest.java` / `RecoveryTest.java` / `TokenTest.java` / `Layer2Test.java` / `CompactTest.java` / `support/FakeCompactProvider.java`
 - **依赖**:T1~T18
 - **步骤**:
-  1. **support/FakeCompactProvider.java**(测试 helper):脚本化驱动 `List<List<StreamEvent>>`,支持按调用次数返回不同错误(覆盖 PromptTooLongException 与其他错误);在最后一帧之前发送 Usage 事件。compact 包内部测试统一用这个 helper。**不要** import `com.mewcode.agent` 的 FakeProvider(包私有不可见)。
+  1. **support/FakeCompactProvider.java**(测试 helper):脚本化驱动 `List<List<StreamEvent>>`,支持按调用次数返回不同错误(覆盖 PromptTooLongException 与其他错误);在最后一帧之前发送 Usage 事件。compact 包内部测试统一用这个 helper。**不要** import `com.cortex.agent` 的 FakeProvider(包私有不可见)。
   2. `StateTest.java`:
      - `testCreateSessionContext`:验证 `<unix>-<hex>` 格式,目录创建成功。
      - `testCreateWithFallbackRandom`:用反射或包内 hook 模拟 SecureRandom 失败,验证降级到 SplittableRandom 仍能返回合法 ID(不抛)。
@@ -490,11 +490,11 @@
      - `testManageContextEmergencyRunsLayer1ThenForce`:trigger=EMERGENCY 时先执行 offloadAndSnip(断言落盘文件存在)再 forceCompact。
      - `testManageContextEmergencyBypassTracking`:人为让 autoTracking.tripped 仍能走 EMERGENCY 路径成功完成。
      - `testManageContextAutoUsageAnchorReplacedNotAccumulated`:FakeCompactProvider 脚本化连续 3 次返回不同 Usage(1000 / 1500 / 2200),主对话路径每次 stream 完成后 anchor 被替换为最新 Usage 之和(依次 1000 / 1500 / 2200),**不是**累加(覆盖 AC22)。
-- **验证**:`./gradlew -q test -Dtest='com.mewcode.compact.*'` 全部通过。
+- **验证**:`./gradlew -q test -Dtest='com.cortex.compact.*'` 全部通过。
 
 ## T23 - Conversation.replaceMessages 测试
 
-- **文件**:`src/test/java/dev/mewcode/conversation/ConversationTest.java`
+- **文件**:`src/test/java/dev/cortex/conversation/ConversationTest.java`
 - **依赖**:T21
 - **步骤**:
   1. 新增 `testReplaceMessagesDeepCopy`:构造 2 条 msg,调 replaceMessages,修改原列表后 `conv.messages()` 不被影响。
@@ -504,12 +504,12 @@
 
 ## T24 - config Provider 新增 contextWindow 与默认值
 
-- **文件**:`src/main/java/com/mewcode/config/ProviderConfig.java` + `src/main/java/com/mewcode/config/ProtocolDefaults.java`(新建)
+- **文件**:`src/main/java/com/cortex/config/ProviderConfig.java` + `src/main/java/com/cortex/config/ProtocolDefaults.java`(新建)
 - **依赖**:T1
 - **步骤**:
   1. 新建 `ProtocolDefaults.java`,定义:
      ```java
-     package com.mewcode.config;
+     package com.cortex.config;
 
      public final class ProtocolDefaults {
          public static final int DEFAULT_ANTHROPIC_CONTEXT_WINDOW = 200000;
@@ -524,11 +524,11 @@
      - 若 `contextWindow > 0` 返回该值。
      - 否则按 `protocol`:`"anthropic"` → `DEFAULT_ANTHROPIC_CONTEXT_WINDOW`、`"openai"` → `DEFAULT_OPENAI_CONTEXT_WINDOW`、其他返回 `DEFAULT_ANTHROPIC_CONTEXT_WINDOW`(保守)。
   4. `ConfigLoader.load(...)` 路径已是 SnakeYAML `Map<String, Object>` → record 绑定,新字段会被自动绑定(只要 yaml key 是 `context_window`,绑定逻辑取 `context_window` 写入 `contextWindow` 字段)。
-- **验证**:编译通过;`grep -rn "import com.mewcode.compact" src/main/java/com/mewcode/config/` 无命中(config 不依赖 compact)。
+- **验证**:编译通过;`grep -rn "import com.cortex.compact" src/main/java/com/cortex/config/` 无命中(config 不依赖 compact)。
 
 ## T25 - config 单元测试 4 种情况
 
-- **文件**:`src/test/java/dev/mewcode/config/ConfigLoaderTest.java`
+- **文件**:`src/test/java/dev/cortex/config/ConfigLoaderTest.java`
 - **依赖**:T24
 - **步骤**:
   1. `testEffectiveContextWindowUnconfigured`:anthropic + 不配置 → 200000。
@@ -539,12 +539,12 @@
 
 ## T26 - Agent 与 SessionRuntime
 
-- **文件**:`src/main/java/com/mewcode/agent/SessionRuntime.java`(新建)+ `src/main/java/com/mewcode/agent/Agent.java`(修改)
+- **文件**:`src/main/java/com/cortex/agent/SessionRuntime.java`(新建)+ `src/main/java/com/cortex/agent/Agent.java`(修改)
 - **依赖**:T2、T3、T4、T19、T24
 - **步骤**:
   1. 新建 `SessionRuntime.java`,定义:
      ```java
-     package com.mewcode.agent;
+     package com.cortex.agent;
 
      public final class SessionRuntime {
          public final ContentReplacementState replacement;
@@ -592,7 +592,7 @@
 
 ## T27 - Agent 主循环集成 manageContext
 
-- **文件**:`src/main/java/com/mewcode/agent/Agent.java`
+- **文件**:`src/main/java/com/cortex/agent/Agent.java`
 - **依赖**:T18、T21、T26
 - **步骤**:
   1. 在 `run()` 入口 `runLock.lock()`,结束 `runLock.unlock()`(`try/finally`),保证不与 runForceCompact 并发触发 manageContext。
@@ -625,11 +625,11 @@
 
 ## T28 - Agent 在 ReadFile 后记录文件追踪
 
-- **文件**:`src/main/java/com/mewcode/agent/Agent.java`
+- **文件**:`src/main/java/com/cortex/agent/Agent.java`
 - **依赖**:T4、T26
 - **步骤**:
   1. Hook 点:在 `runGuarded` / `runTool` 返回 `tool.Result` 之后、`results[i]` 被填回 `executeBatched` 的结果列表之前(同 virtual thread,工具 worker 内同步执行)。**必须**在 `conv.addToolResults(results)` 之前完成,保证下一次 manageContext 能看到本轮 ReadFile 记录。
-  2. 判断条件:`calls.get(i).name().equals("ReadFile")`(mewcode 现有工具名以 `ReadFileTool.name()` 返回值为准)且 `tool.Result.isError() == false`(isError 来自 `tool.Result`,不是 `llm.ToolResult`)。
+  2. 判断条件:`calls.get(i).name().equals("ReadFile")`(cortex 现有工具名以 `ReadFileTool.name()` 返回值为准)且 `tool.Result.isError() == false`(isError 来自 `tool.Result`,不是 `llm.ToolResult`)。
   3. 从 `ToolCall.input`(JsonNode 或 String)取参数:
      ```java
      Map<String, Object> args;
@@ -641,7 +641,7 @@
      Object pathObj = args.get("path");
      if (!(pathObj instanceof String path) || path.isBlank()) continue;
      ```
-     注意 ToolCall 字段是 `input` 不是 `arguments`,参数名以 `ReadFileTool` 定义的 Args 类为准(mewcode 现在用 `path`)。
+     注意 ToolCall 字段是 `input` 不是 `arguments`,参数名以 `ReadFileTool` 定义的 Args 类为准(cortex 现在用 `path`)。
   4. 解析绝对路径:`Path absPath = Path.of(path).toAbsolutePath().normalize();`;失败直接跳过。
   5. 同步读盘:`String content = Files.readString(absPath, UTF_8);`;`IOException` 直接跳过(recovery 缺一条无所谓)。
   6. 写入 recovery:`runtime.recovery.recordFile(absPath.toString(), content);`。
@@ -649,7 +649,7 @@
 
 ## T29 - Agent 紧急压缩 + 重试一次
 
-- **文件**:`src/main/java/com/mewcode/agent/Agent.java`
+- **文件**:`src/main/java/com/cortex/agent/Agent.java`
 - **依赖**:T18、T20、T27
 - **步骤**:
   1. T26 已把 streamOnce 改为抛 `StreamException`。run 主循环在拿到 ex 后用 `ex.getCause() instanceof PromptTooLongException` 判断 PTL。
@@ -700,10 +700,10 @@
 
 ## T29a - Agent emit Compact 状态事件(兑现 spec F24a / F24b)
 
-- **文件**:`src/main/java/com/mewcode/agent/CompactEvent.java`(新建)、`src/main/java/com/mewcode/agent/Agent.java`、`src/test/java/dev/mewcode/agent/AgentTest.java`
+- **文件**:`src/main/java/com/cortex/agent/CompactEvent.java`(新建)、`src/main/java/com/cortex/agent/Agent.java`、`src/test/java/dev/cortex/agent/AgentTest.java`
 - **依赖**:T27、T29
 - **步骤**:
-  1. 在 `com.mewcode.agent` 包定义事件类型:
+  1. 在 `com.cortex.agent` 包定义事件类型:
      ```java
      public enum CompactPhase {
          BEFORE_AUTO, AFTER_AUTO, BEFORE_EMERGENCY, AFTER_EMERGENCY
@@ -745,7 +745,7 @@
 
 ## T30 - Agent runForceCompact 给 TUI 调
 
-- **文件**:`src/main/java/com/mewcode/agent/Agent.java`
+- **文件**:`src/main/java/com/cortex/agent/Agent.java`
 - **依赖**:T27
 - **步骤**:
   1. 新增方法 `public ForceCompactResult runForceCompact(ConversationManager conv, List<Map<String, Object>/*tool schema*/> defs)`,其中 `record ForceCompactResult(long before, long after, Throwable error)`:
@@ -757,7 +757,7 @@
 
 ## T31 - Agent 紧急压缩单元测试
 
-- **文件**:`src/test/java/dev/mewcode/agent/AgentTest.java`
+- **文件**:`src/test/java/dev/cortex/agent/AgentTest.java`
 - **依赖**:T29
 - **步骤**:
   1. 扩展现有 `FakeProvider`:① 在脚本最后一帧之前发 `new StreamEvent.Usage(...)`;② 支持按调用次数序列化错误投递(包括已被 wrap 成 `PromptTooLongException` 的错误),错误通过 `publisher.submit(new AgentEvent.ErrorEvent(wrapped))` 投递到事件流。
@@ -768,7 +768,7 @@
 
 ## T32 - Main 与 SmokeMain 入口改造
 
-- **文件**:`src/main/java/com/mewcode/MewCode.java` + `src/main/java/com/mewcode/smoke/SmokeMewCode.java`
+- **文件**:`src/main/java/com/cortex/Cortex.java` + `src/main/java/com/cortex/smoke/SmokeCortex.java`
 - **依赖**:T2、T3、T4、T26
 - **步骤**:
   1. 启动阶段构造:
@@ -776,17 +776,17 @@
      - `ContentReplacementState replacement = new ContentReplacementState();`。
      - `RecoveryState recovery = new RecoveryState();`。
      - `AutoCompactTrackingState autoTracking = new AutoCompactTrackingState();`。
-  2. `MewCode.java`:若 providers 长度 == 1,启动期即可知 protocol → 直接计算 `int cw = providers.get(0).effectiveContextWindow();`,构造 `SessionRuntime runtime = new SessionRuntime(replacement, recovery, autoTracking, session, cw);` 注入 MewCodeModel。若 providers > 1,让 MewCodeModel 完成 provider 选择后再注入 contextWindow(在 MewCodeModel 的 provider-selected 回调里调 `runtime.contextWindow = providerCfg.effectiveContextWindow();`)。
-  3. `SmokeMewCode.java`:同样按新 Agent 构造签名调用 `Agent.builder().provider(...).registry(...).runtime(runtime).build();`;smoke 场景 contextWindow 可固定 200000。
-  4. Agent 内部由 MewCodeModel 持有(见 T32.5):构造期一次性 `Agent.builder()...build();`,后续 beginTurn 不再重新构造 Agent。
-- **验证**:`./gradlew -q package -DskipTests` 通过;启动 `java -jar build/libs/mewcode.jar` 后 `.mewcode/sessions/<id>/tool-results/` 目录存在。
+  2. `Cortex.java`:若 providers 长度 == 1,启动期即可知 protocol → 直接计算 `int cw = providers.get(0).effectiveContextWindow();`,构造 `SessionRuntime runtime = new SessionRuntime(replacement, recovery, autoTracking, session, cw);` 注入 CortexModel。若 providers > 1,让 CortexModel 完成 provider 选择后再注入 contextWindow(在 CortexModel 的 provider-selected 回调里调 `runtime.contextWindow = providerCfg.effectiveContextWindow();`)。
+  3. `SmokeCortex.java`:同样按新 Agent 构造签名调用 `Agent.builder().provider(...).registry(...).runtime(runtime).build();`;smoke 场景 contextWindow 可固定 200000。
+  4. Agent 内部由 CortexModel 持有(见 T32.5):构造期一次性 `Agent.builder()...build();`,后续 beginTurn 不再重新构造 Agent。
+- **验证**:`./gradlew -q package -DskipTests` 通过;启动 `java -jar build/libs/cortex.jar` 后 `.cortex/sessions/<id>/tool-results/` 目录存在。
 
-## T32.5 - MewCodeModel 持有 SessionRuntime 与 Agent 引用
+## T32.5 - CortexModel 持有 SessionRuntime 与 Agent 引用
 
-- **文件**:`src/main/java/com/mewcode/tui/MewCodeModel.java`
+- **文件**:`src/main/java/com/cortex/tui/CortexModel.java`
 - **依赖**:T26、T32
 - **步骤**:
-  1. `MewCodeModel` 类新增字段 `private final SessionRuntime runtime;` 与 `private Agent agent;`(package 中的 `Agent` 别名按需 import)。
+  1. `CortexModel` 类新增字段 `private final SessionRuntime runtime;` 与 `private Agent agent;`(package 中的 `Agent` 别名按需 import)。
   2. 构造期接收 `SessionRuntime runtime` 参数(Main 注入)。
   3. 若 providers 长度 == 1,构造期内即可 `this.agent = Agent.builder().provider(provider).registry(registry).version(version).engine(engine).runtime(runtime).build();`。
   4. 若多 provider,需在用户选定 provider 后再构造 Agent。把构造时机抽到一个 `ensureAgent()` 方法里,由 `beginTurn` 调一次(已构造时跳过)。
@@ -795,11 +795,11 @@
 
 ## T33 - TUI 命令分发框架
 
-- **文件**:`src/main/java/com/mewcode/tui/Commands.java`
+- **文件**:`src/main/java/com/cortex/tui/Commands.java`
 - **依赖**:T30、T32.5
 - **步骤**:
-  1. 新建 `Commands.java`,包声明 `package com.mewcode.tui;`。
-  2. 定义函数式接口 `@FunctionalInterface public interface CommandHandler { void handle(MewCodeModel app); }`。
+  1. 新建 `Commands.java`,包声明 `package com.cortex.tui;`。
+  2. 定义函数式接口 `@FunctionalInterface public interface CommandHandler { void handle(CortexModel app); }`。
   3. 注册表初始填四项(迁移现有 `/exit` / `/plan` / `/do`,新增 `/compact`):
      ```java
      public static final Map<String, CommandHandler> BUILTIN_COMMANDS = Map.of(
@@ -811,11 +811,11 @@
   4. 实现 `public static Optional<CommandHandler> dispatchCommand(String input)`:
      - 不以 `/` 开头返回 `Optional.empty()`。
      - 否则在 BUILTIN_COMMANDS 找;未找到时返回一个内置 `unknownCommand` handler,通过 `app.pushSystemMessage("未知命令: " + input + ",可用命令: /exit /plan /do /compact")` 输出系统消息,返回 `Optional.of(handler)`。
-  5. 实现 `handleCompact(MewCodeModel app)`:
+  5. 实现 `handleCompact(CortexModel app)`:
      - 在 `Thread.startVirtualThread(() -> { ... })` 里调 `app.getAgent().runForceCompact(app.getConv(), defs);`(`defs` 用 `app.getRegistry().definitions()` 或 `readOnlyDefinitions()`,与下一轮 run 一致)。
      - 完成后通过 `app.getTextGUI().getGUIThread().program.send()(() -> { ... })` 把 `(before, after, err)` 投回 UI 线程;UI 处理时通过 `app.pushSystemMessage(...)` 打印系统消息:成功 `"已压缩,token 从 X 降至 Y"`,失败 `"压缩失败: <err>"`。
      - **命令路径不调** `app.getConv().addUser(...)`,命令输入不进入对话历史。
-  6. `handleExit` / `handlePlan` / `handleDo` 复制 MewCodeModel 现有 switch 分支行为:
+  6. `handleExit` / `handlePlan` / `handleDo` 复制 CortexModel 现有 switch 分支行为:
      - `handleExit`:调 `app.cancel()` + `app.getScreen().stopScreen();` + 退出主循环。
      - `handlePlan`:`app.setMode(PermissionMode.PLAN); app.getInputBox().setText(""); ...`;在 scrollback 输出相同的 noticeBlock。
      - `handleDo`:`app.setMode(PermissionMode.DEFAULT); app.getConv().addUser(Prompt.EXECUTE_DIRECTIVE); app.beginTurn(userBlock("/do"));`。
@@ -823,10 +823,10 @@
 
 ## T34 - TUI 输入路径接入 dispatchCommand
 
-- **文件**:`src/main/java/com/mewcode/tui/MewCodeModel.java`
+- **文件**:`src/main/java/com/cortex/tui/CortexModel.java`
 - **依赖**:T33
 - **步骤**:
-  1. mewcode 现有 `MewCodeModel.submit()` 内部已有针对 `/exit` / `/plan` / `/do` 的 switch 分支。把这段 switch 整段删除,改为统一的命令分发:
+  1. cortex 现有 `CortexModel.submit()` 内部已有针对 `/exit` / `/plan` / `/do` 的 switch 分支。把这段 switch 整段删除,改为统一的命令分发:
      ```java
      void submit() {
          String text = inputBox.getText().strip();
@@ -843,11 +843,11 @@
      }
      ```
   2. 命令路径不写入 conversation、不调 LLM;系统消息只通过 scrollback Panel 渲染,不进入 `conv.messages()`。
-- **验证**:`./gradlew compileJava` 通过;手动跑 tmux 启动 mewcode 输入 `/compact`、`/exit`、`/plan`、`/do` 验证行为;输入 `/unknown` 看到友好提示。
+- **验证**:`./gradlew compileJava` 通过;手动跑 tmux 启动 cortex 输入 `/compact`、`/exit`、`/plan`、`/do` 验证行为;输入 `/unknown` 看到友好提示。
 
 ## T34a - TUI 渲染 Compact 状态事件(兑现 spec F24a / F24b)
 
-- **文件**:`src/main/java/com/mewcode/tui/AgentEvent 队列.java`、`src/main/java/com/mewcode/tui/Commands.java`、`src/test/java/dev/mewcode/tui/MewCodeModelTest.java`
+- **文件**:`src/main/java/com/cortex/tui/AgentEvent 队列.java`、`src/main/java/com/cortex/tui/Commands.java`、`src/test/java/dev/cortex/tui/CortexModelTest.java`
 - **依赖**:T29a、T34
 - **步骤**:
   1. `AgentEvent 队列.onNext(AgentEvent event)` 中新增 `event instanceof CompactEvent c` 分支(优先级最高,先于 ToolEvent / TextEvent / Done 判断):
@@ -869,15 +869,15 @@
      - `AFTER_AUTO` / `AFTER_EMERGENCY` 成功(error == null) → `String.format("已压缩,token 从 %d 降至 %d", ev.before(), ev.after())`
      - After*(error != null) → `String.format("压缩失败:%s", ev.error().getMessage())`
   3. `handleCompact` 的 program.send() 回投路径复用 `formatCompactNotice`,把手动 `/compact` 完成后的 `(before, after, err)` 包装成一个 `new CompactEvent(CompactPhase.AFTER_AUTO, ...)` 走同一段渲染方法,保证自动 / 紧急 / 手动三条路径的文案完全一致。
-  4. MewCodeModelTest 新增 3 个用例:
+  4. CortexModelTest 新增 3 个用例:
      - `testTuiRendersBeforeAutoNotice`:注入 `new CompactEvent(BEFORE_AUTO, 0, 0, null)`,断言 scrollback 出现 `"正在压缩上下文..."` 且未写入 conv。
      - `testTuiRendersBeforeEmergencyNotice`:注入 `BEFORE_EMERGENCY`,断言出现 `"上下文撞墙,自动压缩中..."`。
      - `testTuiRendersAfterCompactNotice`:注入 `new CompactEvent(AFTER_AUTO, 167000, 12000, null)`,断言出现 `"已压缩,token 从 167000 降至 12000"`;再注入 error != null 的版本断言出现 `"压缩失败:..."`。
-- **验证**:`./gradlew compileJava` 通过;`./gradlew -q test -Dtest='MewCodeModelTest#testTuiRenders*Notice'` 通过。
+- **验证**:`./gradlew compileJava` 通过;`./gradlew -q test -Dtest='CortexModelTest#testTuiRenders*Notice'` 通过。
 
 ## T35 - TUI 命令分发测试
 
-- **文件**:`src/test/java/dev/mewcode/tui/MewCodeModelTest.java`
+- **文件**:`src/test/java/dev/cortex/tui/CortexModelTest.java`
 - **依赖**:T34
 - **步骤**:
   1. `testTuiSlashCompactRoutesToCommand`:注入一个 mockAgent,输入 `/compact` 后断言 `mockAgent.runForceCompactCalls == 1`、`mockAgent.runCalls == 0`(不调 LLM 主对话路径)。
@@ -885,11 +885,11 @@
   3. `testTuiMigratedExitStillWorks`:输入 `/exit`,断言走命令路径调用 cancel + stopScreen,行为与迁移前一致。
   4. `testTuiMigratedPlanStillWorks`:输入 `/plan`,断言 mode 切到 PLAN,输出 noticeBlock,未调 run。
   5. `testTuiMigratedDoStillWorks`:输入 `/do`,断言 mode 切到 DEFAULT、conv 追加 ExecuteDirective 并启动一轮 run。
-- **验证**:`./gradlew -q test -Dtest='MewCodeModelTest'` 通过。
+- **验证**:`./gradlew -q test -Dtest='CortexModelTest'` 通过。
 
 ## T36 - 更新 config.yaml 示例
 
-- **文件**:`.mewcode/config.yaml.example`
+- **文件**:`.cortex/config.yaml.example`
 - **依赖**:T24
 - **步骤**:
   1. 在每个 provider 示例项下加 `context_window: <值>` 字段。
@@ -901,18 +901,18 @@
 - **文件**:`.gitignore`
 - **依赖**:T2
 - **步骤**:
-  1. 在 .gitignore 末尾追加一行 `.mewcode/sessions/`。
+  1. 在 .gitignore 末尾追加一行 `.cortex/sessions/`。
   2. 提交时在 PR 说明中点出。
-- **验证**:启动 mewcode 后跑一次工具调用,`git status` 干净(不出现 sessions 子目录)。
+- **验证**:启动 cortex 后跑一次工具调用,`git status` 干净(不出现 sessions 子目录)。
 
 ## T37 - 端到端冒烟(tmux 手测)
 
 - **文件**:无(手测)
 - **依赖**:T32、T34
 - **步骤**:
-  1. `./gradlew -q package -DskipTests` → 拿到 `build/libs/mewcode.jar`(或 `build/libs/mewcode` shaded jar)。
-  2. 用 tmux 启动 `java -jar build/libs/mewcode.jar`,配置好 anthropic provider。
-  3. 触发一次大文件 ReadFile(构造一个 80KB 文件)→ 观察 `.mewcode/sessions/<id>/tool-results/` 下出现该工具调用 id 的文件;下一轮请求里该工具结果展示成预览体。
+  1. `./gradlew -q package -DskipTests` → 拿到 `build/libs/cortex.jar`(或 `build/libs/cortex` shaded jar)。
+  2. 用 tmux 启动 `java -jar build/libs/cortex.jar`,配置好 anthropic provider。
+  3. 触发一次大文件 ReadFile(构造一个 80KB 文件)→ 观察 `.cortex/sessions/<id>/tool-results/` 下出现该工具调用 id 的文件;下一轮请求里该工具结果展示成预览体。
   4. 连续多轮对话直到接近 context 上限。临时把 `context_window` 配成 **80000**(满足 80000 - 20000 - 13000 = 47000 仍为正数;contextWindow 必须 > 33000 才能让自动阈值有效),让前几轮工具结果先填到 ~50000 字符触发自动 layer2。观察自动压缩发生;TUI 不闪退,对话继续。
   5. 任意时刻输入 `/compact` → 看到系统消息 `已压缩,token 从 X 降至 Y`。
   6. 输入 `/unknown` → 看到未知命令提示,未发 LLM。

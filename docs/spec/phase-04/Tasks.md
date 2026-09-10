@@ -1,44 +1,44 @@
 # 系统提示工程化 Tasks
 
-> 顶层包:`com.mewcode`(Java 21 / Gradle)。构建产物在 `build/libs/`。
+> 顶层包:`com.cortex`(Java 21 / Gradle)。构建产物在 `build/libs/`。
 
 ## 文件清单
 
 | 操作 | 文件                                                     | 职责                                                                                                                      |
 | ---- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| 新建 | `src/main/java/com/mewcode/prompt/Module.java`           | `Module` record                                                                                                           |
-| 新建 | `src/main/java/com/mewcode/prompt/Modules.java`          | `fixedModules()` 七固定模块、`optionalModules()` 三空槽的内容常量                                                         |
-| 改   | `src/main/java/com/mewcode/prompt/Prompt.java`           | `assembleSystem`/`buildSystemPrompt`;删旧 `SYSTEM_PROMPT`/`PLAN_MODE_REMINDER`/`EXECUTE_DIRECTIVE` 常量(迁移);保留 banner |
-| 新建 | `src/main/java/com/mewcode/prompt/Environment.java`      | `Environment` record、`gather`、`render`                                                                                  |
-| 新建 | `src/main/java/com/mewcode/prompt/Reminder.java`         | `systemReminder` 标签包裹、`plan(boolean full)`、规划提醒完整/精简常量、`EXECUTE_DIRECTIVE`                               |
-| 新建 | `src/test/java/dev/mewcode/prompt/PromptTest.java`       | 装配顺序、跳空槽、N1 确定性、双重强化文本断言                                                                             |
-| 新建 | `src/test/java/dev/mewcode/prompt/EnvironmentTest.java`  | 非 git 降级、`render` 含 cwd/platform/date                                                                                |
-| 新建 | `src/test/java/dev/mewcode/prompt/ReminderTest.java`     | `<system-reminder>` 标签 + 完整/精简                                                                                      |
-| 改   | `src/main/java/com/mewcode/tool/EditFileTool.java`       | `description()` 补「编辑前先 read_file」                                                                                  |
-| 改   | `src/main/java/com/mewcode/tool/BashTool.java`           | `description()` 补「优先用专用工具而非 bash 拼凑」                                                                        |
-| 新建 | `src/main/java/com/mewcode/llm/Request.java`             | `Request` record                                                                                                          |
-| 新建 | `src/main/java/com/mewcode/llm/System.java`              | `System` record(stable + environment)                                                                                     |
-| 改   | `src/main/java/com/mewcode/llm/Usage.java`               | 加 `cacheWrite`/`cacheRead`                                                                                               |
-| 改   | `src/main/java/com/mewcode/llm/Provider.java`            | `stream(Request)`;删 `effectiveSystem` 及 prompt import                                                                   |
-| 改   | `src/main/java/com/mewcode/llm/AnthropicProvider.java`   | 两块 system(稳定块打断点 + env 块)、缓存用量解析、reminder 并入末条 user                                                  |
-| 改   | `src/main/java/com/mewcode/llm/OpenAIProvider.java`      | 单条 system(stable+env 拼接)、`cachedTokens` 解析、reminder 追加尾部 user                                                 |
-| 新建 | `src/test/java/dev/mewcode/llm/AnthropicSystemTest.java` | 序列化断言 `cacheControl` 只挂在 stable 块、env 块无                                                                      |
-| 改   | `src/main/java/com/mewcode/agent/Agent.java`             | 构造器加 `version`;`run` 采集环境/装配系统;按轮次 reminder;缓存用量透传                                                   |
-| 改   | `src/test/java/dev/mewcode/agent/AgentTest.java`         | 断言 Request 装配(system 两段、规划按轮次 reminder)、缓存用量透传;修既有用例适配新签名                                    |
-| 改   | `src/main/java/com/mewcode/tui/AgentEvent 队列.java`     | `new Agent(...)` 传 `tuiApp.version()`                                                                                    |
-| 改   | `src/main/java/com/mewcode/smoke/SmokeMewCode.java`      | 打印缓存用量;`new Agent(p, registry, "dev")`                                                                              |
+| 新建 | `src/main/java/com/cortex/prompt/Module.java`           | `Module` record                                                                                                           |
+| 新建 | `src/main/java/com/cortex/prompt/Modules.java`          | `fixedModules()` 七固定模块、`optionalModules()` 三空槽的内容常量                                                         |
+| 改   | `src/main/java/com/cortex/prompt/Prompt.java`           | `assembleSystem`/`buildSystemPrompt`;删旧 `SYSTEM_PROMPT`/`PLAN_MODE_REMINDER`/`EXECUTE_DIRECTIVE` 常量(迁移);保留 banner |
+| 新建 | `src/main/java/com/cortex/prompt/Environment.java`      | `Environment` record、`gather`、`render`                                                                                  |
+| 新建 | `src/main/java/com/cortex/prompt/Reminder.java`         | `systemReminder` 标签包裹、`plan(boolean full)`、规划提醒完整/精简常量、`EXECUTE_DIRECTIVE`                               |
+| 新建 | `src/test/java/dev/cortex/prompt/PromptTest.java`       | 装配顺序、跳空槽、N1 确定性、双重强化文本断言                                                                             |
+| 新建 | `src/test/java/dev/cortex/prompt/EnvironmentTest.java`  | 非 git 降级、`render` 含 cwd/platform/date                                                                                |
+| 新建 | `src/test/java/dev/cortex/prompt/ReminderTest.java`     | `<system-reminder>` 标签 + 完整/精简                                                                                      |
+| 改   | `src/main/java/com/cortex/tool/EditFileTool.java`       | `description()` 补「编辑前先 read_file」                                                                                  |
+| 改   | `src/main/java/com/cortex/tool/BashTool.java`           | `description()` 补「优先用专用工具而非 bash 拼凑」                                                                        |
+| 新建 | `src/main/java/com/cortex/llm/Request.java`             | `Request` record                                                                                                          |
+| 新建 | `src/main/java/com/cortex/llm/System.java`              | `System` record(stable + environment)                                                                                     |
+| 改   | `src/main/java/com/cortex/llm/Usage.java`               | 加 `cacheWrite`/`cacheRead`                                                                                               |
+| 改   | `src/main/java/com/cortex/llm/Provider.java`            | `stream(Request)`;删 `effectiveSystem` 及 prompt import                                                                   |
+| 改   | `src/main/java/com/cortex/llm/AnthropicProvider.java`   | 两块 system(稳定块打断点 + env 块)、缓存用量解析、reminder 并入末条 user                                                  |
+| 改   | `src/main/java/com/cortex/llm/OpenAIProvider.java`      | 单条 system(stable+env 拼接)、`cachedTokens` 解析、reminder 追加尾部 user                                                 |
+| 新建 | `src/test/java/dev/cortex/llm/AnthropicSystemTest.java` | 序列化断言 `cacheControl` 只挂在 stable 块、env 块无                                                                      |
+| 改   | `src/main/java/com/cortex/agent/Agent.java`             | 构造器加 `version`;`run` 采集环境/装配系统;按轮次 reminder;缓存用量透传                                                   |
+| 改   | `src/test/java/dev/cortex/agent/AgentTest.java`         | 断言 Request 装配(system 两段、规划按轮次 reminder)、缓存用量透传;修既有用例适配新签名                                    |
+| 改   | `src/main/java/com/cortex/tui/AgentEvent 队列.java`     | `new Agent(...)` 传 `tuiApp.version()`                                                                                    |
+| 改   | `src/main/java/com/cortex/smoke/SmokeCortex.java`      | 打印缓存用量;`new Agent(p, registry, "dev")`                                                                              |
 
 ---
 
 ## T1: prompt 模块化装配
 
-**文件:** `src/main/java/com/mewcode/prompt/Module.java`、`src/main/java/com/mewcode/prompt/Modules.java`、`src/main/java/com/mewcode/prompt/Prompt.java`
+**文件:** `src/main/java/com/cortex/prompt/Module.java`、`src/main/java/com/cortex/prompt/Modules.java`、`src/main/java/com/cortex/prompt/Prompt.java`
 **依赖:** 无
 **步骤:**
 
 1. 在 `Module.java` 定义 `public record Module(String name, int priority, String content) {}`。
 2. `Modules.fixedModules()` 返回 `List<Module>`,七个固定模块,内容内置(中英按现有 `SYSTEM_PROMPT` 风格,英文为主):
-   - 身份(10):MewCode 是终端编码 Agent。
+   - 身份(10):Cortex 是终端编码 Agent。
    - 系统约束(20):操作边界——在工作目录约定内行事、不外泄密钥、对破坏性操作谨慎。
    - 任务模式(30):ReAct——多步推进、读后再改、完成才给终答。
    - 动作执行(40):何时调工具、连续只读可并发、有副作用谨慎。
@@ -55,7 +55,7 @@
 
 ## T2: 环境采集与渲染
 
-**文件:** `src/main/java/com/mewcode/prompt/Environment.java`
+**文件:** `src/main/java/com/cortex/prompt/Environment.java`
 **依赖:** 无
 **步骤:**
 
@@ -70,7 +70,7 @@
 
 ## T3: 补充消息与规划提醒构造
 
-**文件:** `src/main/java/com/mewcode/prompt/Reminder.java`
+**文件:** `src/main/java/com/cortex/prompt/Reminder.java`
 **依赖:** 无
 **步骤:**
 
@@ -83,7 +83,7 @@
 
 ## T4: prompt 单测
 
-**文件:** `src/test/java/dev/mewcode/prompt/PromptTest.java`
+**文件:** `src/test/java/dev/cortex/prompt/PromptTest.java`
 **依赖:** T1, T2, T3
 **步骤:**
 
@@ -97,7 +97,7 @@
 
 ## T5: 工具描述双重强化
 
-**文件:** `src/main/java/com/mewcode/tool/EditFileTool.java`、`src/main/java/com/mewcode/tool/BashTool.java`
+**文件:** `src/main/java/com/cortex/tool/EditFileTool.java`、`src/main/java/com/cortex/tool/BashTool.java`
 **依赖:** 无
 **步骤:**
 
@@ -109,21 +109,21 @@
 
 ## T6: llm 接口改造
 
-**文件:** `src/main/java/com/mewcode/llm/System.java`、`src/main/java/com/mewcode/llm/Request.java`、`src/main/java/com/mewcode/llm/Usage.java`、`src/main/java/com/mewcode/llm/Provider.java`
+**文件:** `src/main/java/com/cortex/llm/System.java`、`src/main/java/com/cortex/llm/Request.java`、`src/main/java/com/cortex/llm/Usage.java`、`src/main/java/com/cortex/llm/Provider.java`
 **依赖:** 无(但 T7/T8/T9 依赖本任务)
 **步骤:**
 
 1. 新增 `public record System(String stable, String environment)`、`public record Request(List<Message> messages, List<Map<String, Object>/*tool schema*/> tools, System system, String reminder)`。
 2. `Usage` 加 `long cacheWrite`、`long cacheRead`(若 `Usage` 已是 record,定义新 record 含全部字段;若为类,加字段与 accessor)。
 3. `Provider.stream` 改为 `BlockingQueue<StreamEvent> stream(Request req)`;更新接口 javadoc。
-4. 删除 `effectiveSystem` 方法与对 `com.mewcode.prompt` 包的 import。
+4. 删除 `effectiveSystem` 方法与对 `com.cortex.prompt` 包的 import。
 5. 工厂、构造器签名保持。
 
 **验证:** `./gradlew compileJava` 在 `AnthropicProvider`/`OpenAIProvider` 报未适配的编译错(预期),T7/T8 修复。
 
 ## T7: Anthropic 适配缓存通道 + reminder
 
-**文件:** `src/main/java/com/mewcode/llm/AnthropicProvider.java`
+**文件:** `src/main/java/com/cortex/llm/AnthropicProvider.java`
 **依赖:** T6
 **步骤:**
 
@@ -140,7 +140,7 @@
 
 ## T8: OpenAI 适配缓存通道 + reminder
 
-**文件:** `src/main/java/com/mewcode/llm/OpenAIProvider.java`
+**文件:** `src/main/java/com/cortex/llm/OpenAIProvider.java`
 **依赖:** T6
 **步骤:**
 
@@ -152,7 +152,7 @@
 
 ## T9: agent 改造
 
-**文件:** `src/main/java/com/mewcode/agent/Agent.java`
+**文件:** `src/main/java/com/cortex/agent/Agent.java`
 **依赖:** T1, T2, T3, T6
 **步骤:**
 
@@ -167,18 +167,18 @@
 
 ## T10: TUI 与 smoke 接线
 
-**文件:** `src/main/java/com/mewcode/tui/AgentEvent 队列.java`、`src/main/java/com/mewcode/smoke/SmokeMewCode.java`
+**文件:** `src/main/java/com/cortex/tui/AgentEvent 队列.java`、`src/main/java/com/cortex/smoke/SmokeCortex.java`
 **依赖:** T9
 **步骤:**
 
-1. `AgentEvent 队列`(或 `MewCodeModel` 内构造 Agent 的位置):改 `new Agent(provider, registry, tuiApp.version())`;`/do` 注入仍用 `Reminder.EXECUTE_DIRECTIVE`(已迁至 `Reminder.java`,import 路径更新)。
+1. `AgentEvent 队列`(或 `CortexModel` 内构造 Agent 的位置):改 `new Agent(provider, registry, tuiApp.version())`;`/do` 注入仍用 `Reminder.EXECUTE_DIRECTIVE`(已迁至 `Reminder.java`,import 路径更新)。
 2. `SmokeMain`:`new Agent(p, ToolToolRegistry.createDefault(), "dev")`;消费 `Event.usage()` 时打印 `input/output/cache_write/cache_read`;可改为连发两条消息观察次轮 `cacheRead`。
 
-**验证:** `./gradlew shadowJar` 全绿;`java -jar build/libs/mewcode.jar` 可启动。
+**验证:** `./gradlew shadowJar` 全绿;`java -jar build/libs/cortex.jar` 可启动。
 
 ## T11: agent 单测适配
 
-**文件:** `src/test/java/dev/mewcode/agent/AgentTest.java`
+**文件:** `src/test/java/dev/cortex/agent/AgentTest.java`
 **依赖:** T9
 **步骤:**
 

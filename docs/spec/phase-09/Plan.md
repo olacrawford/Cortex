@@ -4,16 +4,16 @@
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│                  com.mewcode.tui                         │
+│                  com.cortex.tui                         │
 │                                                          │
-│  MewCodeModel.submit() ─┬─► Dispatch.parse → CommandRegistry   │
+│  CortexModel.submit() ─┬─► Dispatch.parse → CommandRegistry   │
 │                   │      (lookup by name/alias)          │
 │                   │             │                        │
 │                   │             ▼                        │
 │                   │      Handler.handle(ctx, ui)         │
 │                   │             │                        │
 │                   │             ▼ via Ui interface       │
-│                   │      MewCodeModel 字段桥接 (impl Ui)        │
+│                   │      CortexModel 字段桥接 (impl Ui)        │
 │                   │                                      │
 │                   └─► (非 / 开头) conv.addUser + beginTurn│
 │                                                          │
@@ -23,7 +23,7 @@
                   │ 依赖
                   │
 ┌──────────────────────────────────────────────────────────┐
-│              com.mewcode.command (新包)                  │
+│              com.cortex.command (新包)                  │
 │                                                          │
 │  Command/Kind/Handler 类型定义                           │
 │  CommandRegistry: 注册 + 冲突检测 + 前缀匹配 + 字典序排序│
@@ -33,16 +33,16 @@
 └──────────────────────────────────────────────────────────┘
 ```
 
-- 新建包 `com.mewcode.command`：纯领域逻辑,不依赖 JLine/tui.tea
-- 既有包 `com.mewcode.tui`：删掉 `Commands.java` 里的旧注册表与 5 个旧 handler；改为构造 `CommandRegistry`、实现 `Ui` 接口、把分发结果桥接回 `MewCodeModel`
-- 自动补全菜单是 TUI 层独有的 UX 元素,完全在 `com.mewcode.tui.CompletionMenu` 中实现,只读 `CommandRegistry` 拿候选列表
+- 新建包 `com.cortex.command`：纯领域逻辑,不依赖 JLine/tui.tea
+- 既有包 `com.cortex.tui`：删掉 `Commands.java` 里的旧注册表与 5 个旧 handler；改为构造 `CommandRegistry`、实现 `Ui` 接口、把分发结果桥接回 `CortexModel`
+- 自动补全菜单是 TUI 层独有的 UX 元素,完全在 `com.cortex.tui.CompletionMenu` 中实现,只读 `CommandRegistry` 拿候选列表
 
 ## 核心数据结构
 
 ### `command.Kind`
 
 ```java
-package com.mewcode.command;
+package com.cortex.command;
 
 public enum Kind {
     LOCAL,   // 纯本地: 只打印, 不改 TUI 状态, 不进 history
@@ -54,7 +54,7 @@ public enum Kind {
 ### `command.Command`
 
 ```java
-package com.mewcode.command;
+package com.cortex.command;
 
 public record Command(
         String name,                // 不带 "/" 前缀, 全小写, 唯一
@@ -89,21 +89,21 @@ public final class CommandRegistry {
 
 ### `command.Ui` 接口
 
-handler 通过该接口操作 TUI；`MewCodeModel` 实现此接口。
+handler 通过该接口操作 TUI；`CortexModel` 实现此接口。
 
 ```java
-package com.mewcode.command;
+package com.cortex.command;
 
 import java.util.List;
 
 public interface Ui {
-    // 输出 (通过 MewCodeModel 的 pendingPrintln 缓冲 -> View 下一帧把 noticeBlock 推进 scrollback)
+    // 输出 (通过 CortexModel 的 pendingPrintln 缓冲 -> View 下一帧把 noticeBlock 推进 scrollback)
     void println(String msg);
     void error(String msg);
 
     // 模式
-    com.mewcode.permission.Mode mode();
-    void setMode(com.mewcode.permission.Mode m);
+    com.cortex.permission.Mode mode();
+    void setMode(com.cortex.permission.Mode m);
 
     // 对话注入 (KindPrompt 命令使用)
     // displayLabel 在 scrollback 中显示, presetPrompt 是实际写入 conversation/JSONL 的文本
@@ -142,20 +142,20 @@ public interface Ui {
 ### `tui.CompletionMenu` (新)
 
 ```java
-package com.mewcode.tui;
+package com.cortex.tui;
 
 public final class CompletionMenu {
     static final int MAX_ROWS = 8;
 
-    private java.util.List<com.mewcode.command.Command> items = java.util.List.of(); // 当前候选, 已按 name 字典序
+    private java.util.List<com.cortex.command.Command> items = java.util.List.of(); // 当前候选, 已按 name 字典序
     private int cursor;   // 当前高亮索引
     private int offset;   // 滚动偏移 (候选数 > MAX_ROWS 时)
     private boolean active; // 是否激活
 
-    public void update(String input, com.mewcode.command.CommandRegistry reg); // 根据当前输入刷新候选; 无 "/" 前缀则 deactivate
+    public void update(String input, com.cortex.command.CommandRegistry reg); // 根据当前输入刷新候选; 无 "/" 前缀则 deactivate
     public void moveUp();
     public void moveDown();
-    public com.mewcode.command.Command selected();
+    public com.cortex.command.Command selected();
     public void hide();
     public String render(int width); // 多行字符串, 已按 MAX_ROWS 截断 + 滚动
     public boolean active();
@@ -163,7 +163,7 @@ public final class CompletionMenu {
 ```
 
 **边界规则**：
-- `MewCodeModel.handleCompletionKey` 在 TextBox 内容含 `\n` 时强制 `active=false`（避免多行粘贴误激活）
+- `CortexModel.handleCompletionKey` 在 TextBox 内容含 `\n` 时强制 `active=false`（避免多行粘贴误激活）
 - `selected() == null` 时（零匹配）,回车走未命中提示分支、Tab/ESC 仅关闭菜单
 
 ## 模块设计
@@ -171,7 +171,7 @@ public final class CompletionMenu {
 ### `command/Command.java`
 **职责**：定义 `Command` record、`Handler` 函数接口。
 **对外接口**：上面列出的类型。
-**依赖**：仅 `com.mewcode.permission`（Kind 的语义说明引用）。
+**依赖**：仅 `com.cortex.permission`（Kind 的语义说明引用）。
 
 ### `command/CommandRegistry.java`
 **职责**：注册中心。维护 `byName` 索引、`visible` 排序列表；`register` 时做冲突检测；`prefixMatch` 提供补全数据源。
@@ -213,11 +213,11 @@ public final class CompletionMenu {
 
 ### `tui/Commands.java`（改造）
 **职责**：变成 thin glue：
-1. 给 `MewCodeModel` 实现 `Ui` 接口的所有方法（每个方法 1~5 行,字段桥接 + push 到 `pendingPrintln`）
-2. 提供 `MewCodeModel.dispatchSlash(String text)`：调 `Dispatch.parse` → `cmdRegistry.lookup` → 找到则 `cmd.handler().handle(this.cancelled, this)`、未找到则 push `noticeBlock("未知命令...")` 到 `pendingPrintln`
-3. 删掉 `builtinCommands` Map、`handleExit`/`handlePlan`/`handleDo`/`handleCompact`/`handleUnknown` 等 5 个老 handler；保留 `handleResume` 中和 `openResumeMenu` Ui 方法整合的部分（ch09 写的 list/state 启动逻辑搬到 `MewCodeModel.openResumeMenu`）
+1. 给 `CortexModel` 实现 `Ui` 接口的所有方法（每个方法 1~5 行,字段桥接 + push 到 `pendingPrintln`）
+2. 提供 `CortexModel.dispatchSlash(String text)`：调 `Dispatch.parse` → `cmdRegistry.lookup` → 找到则 `cmd.handler().handle(this.cancelled, this)`、未找到则 push `noticeBlock("未知命令...")` 到 `pendingPrintln`
+3. 删掉 `builtinCommands` Map、`handleExit`/`handlePlan`/`handleDo`/`handleCompact`/`handleUnknown` 等 5 个老 handler；保留 `handleResume` 中和 `openResumeMenu` Ui 方法整合的部分（ch09 写的 list/state 启动逻辑搬到 `CortexModel.openResumeMenu`）
 
-**依赖**：`com.mewcode.command`、`com.mewcode.permission`、`com.mewcode.prompt`。
+**依赖**：`com.cortex.command`、`com.cortex.permission`、`com.cortex.prompt`。
 
 ### `agent/SessionRuntime.java`（改动）
 - `SessionRuntime` 新增 `resetForNewSession(compact.SessionContext sesCtx)` 方法：原子重置 `replacement`/`recovery`/`autoTracking` 三个 compact 子状态,`usageAnchor`/`anchorMsgLen`/`turnCount` 清零,`session` 字段指向新的 `sesCtx`；`contextWindow` 保留；writer 与 conv 重建由 `clearAndNewSession` 自身负责,不进 runtime 接口
@@ -228,11 +228,11 @@ public final class CompletionMenu {
 ### `tui/CompletionMenu.java`（新）
 **职责**：自动补全菜单状态机 + 渲染。
 - `CompletionMenu` 类与方法见数据结构小节
-- 提供 `MewCodeModel.handleCompletionKey(KeyStroke ks)`：当菜单激活时,返回 `true` 表示该键已被菜单消费；否则返回 `false` 让上层透传给 TextBox
-- 提供 `MewCodeModel.syncCompletionFromInput()`：每次 TextBox 内容变化后调用,根据当前内容刷新菜单 active/items
+- 提供 `CortexModel.handleCompletionKey(KeyStroke ks)`：当菜单激活时,返回 `true` 表示该键已被菜单消费；否则返回 `false` 让上层透传给 TextBox
+- 提供 `CortexModel.syncCompletionFromInput()`：每次 TextBox 内容变化后调用,根据当前内容刷新菜单 active/items
 
-### `tui/MewCodeModel.java`（改动）
-- `MewCodeModel` 增字段：`CommandRegistry cmdRegistry`、`CompletionMenu completion`、`List<String> pendingPrintln`、`Runnable pendingAction`
+### `tui/CortexModel.java`（改动）
+- `CortexModel` 增字段：`CommandRegistry cmdRegistry`、`CompletionMenu completion`、`List<String> pendingPrintln`、`Runnable pendingAction`
 - 构造时：`var reg = new CommandRegistry(); Builtins.registerAll(reg); this.cmdRegistry = reg;`
 - `IDLE` 状态下处理 `KeyStroke`：
   - 先调 `handleCompletionKey(ks)`,被消费则直接返回
@@ -248,15 +248,15 @@ public final class CompletionMenu {
 ### 命令分发流（用户回车）
 
 ```
-keystroke (Enter) ─► MewCodeModel.handleInput (IDLE)
+keystroke (Enter) ─► CortexModel.handleInput (IDLE)
                        │
                        ▼
-                 MewCodeModel.submit()
+                 CortexModel.submit()
                   trim 输入
                   空输入 → 早返回
                        │
                        ▼
-                MewCodeModel.dispatchSlash(text)
+                CortexModel.dispatchSlash(text)
                   │
                   ├─ Dispatch.parse(text)
                   │   isSlash=false → 返回 false (上层走 addUser + beginTurn)
@@ -270,7 +270,7 @@ keystroke (Enter) ─► MewCodeModel.handleInput (IDLE)
                        ├─ throws ex → pendingPrintln.add(errorBlock(ex.getMessage()))
                        │
                        ▼
-                     通过 Ui 接口操作 MewCodeModel
+                     通过 Ui 接口操作 CortexModel
                        ├─ println    → pendingPrintln.add(noticeBlock(...))
                        ├─ setMode    → this.mode = newMode
                        ├─ injectAndSend → conv.addUser(preset) + beginTurn(userBlock(label))
@@ -278,15 +278,15 @@ keystroke (Enter) ─► MewCodeModel.handleInput (IDLE)
                        ├─ forceCompact / openResumeMenu / clearAndNewSession → 触发对应 sub-flow
 ```
 
-注意：`Ui.quit()` / `Ui.forceCompact()` 等需要异步动作的实现,通过 `MewCodeModel` 内部缓存的 `pendingAction` 字段：Ui 方法 push 一个 `Runnable` 到 `pendingAction`,`dispatchSlash` 在 handler 返回后从 `pendingAction` 取出,在 GUI 线程上 `program.send()` 执行。这样 Ui 接口不需要返回值,handler 写起来线性。
+注意：`Ui.quit()` / `Ui.forceCompact()` 等需要异步动作的实现,通过 `CortexModel` 内部缓存的 `pendingAction` 字段：Ui 方法 push 一个 `Runnable` 到 `pendingAction`,`dispatchSlash` 在 handler 返回后从 `pendingAction` 取出,在 GUI 线程上 `program.send()` 执行。这样 Ui 接口不需要返回值,handler 写起来线性。
 
 ### 自动补全流
 
 ```
-keystroke (任意字符) ─► MewCodeModel.handleInput (IDLE)
+keystroke (任意字符) ─► CortexModel.handleInput (IDLE)
                           │
                           ▼
-                  MewCodeModel.handleCompletionKey(ks)
+                  CortexModel.handleCompletionKey(ks)
                     ┌─ 菜单 active=true:
                     │    ↑/↓     → menu.moveUp/Down, 消费
                     │    Tab/⏎   → 执行 menu.selected() 的 handler, 关闭菜单, 消费
@@ -297,7 +297,7 @@ keystroke (任意字符) ─► MewCodeModel.handleInput (IDLE)
                          不消费, 透传
 
 (透传 TextBox 处理后)
-MewCodeModel.syncCompletionFromInput()
+CortexModel.syncCompletionFromInput()
   读 textBox.getText()
   首字符是 "/" → menu.update(value, cmdRegistry) → active=true 或刷新候选
   首字符非 "/" → menu.hide()
@@ -315,7 +315,7 @@ View.render():
 ## 文件组织
 
 ```
-src/main/java/com/mewcode/command/        新包
+src/main/java/com/cortex/command/        新包
 ├── Kind.java              Kind 枚举
 ├── Command.java           Command record + Handler 函数接口
 ├── CommandRegistry.java   register/lookup/visible/prefixMatch
@@ -326,37 +326,37 @@ src/main/java/com/mewcode/command/        新包
 ├── BuiltinUi.java         /exit /plan /compact /resume /clear
 └── BuiltinPrompt.java     /do /review
 
-src/test/java/dev/mewcode/command/
+src/test/java/dev/cortex/command/
 ├── CommandRegistryTest.java   注册中心冲突 / 前缀匹配测试
 ├── DispatchTest.java          parse 测试
 └── BuiltinsTest.java          12 条命令的注册与 NopUi 调用测试
 
-src/main/java/com/mewcode/tui/
-├── Commands.java         改造: MewCodeModel 实现 Ui 接口 + dispatchSlash + 删旧 handler
+src/main/java/com/cortex/tui/
+├── Commands.java         改造: CortexModel 实现 Ui 接口 + dispatchSlash + 删旧 handler
 ├── CompletionMenu.java   新: CompletionMenu + handleCompletionKey + syncCompletionFromInput
 ├── AgentEvent 队列.java       改: submit() 调 dispatchSlash
-├── MewCodeModel.java           改: 加 cmdRegistry + completion 字段, 构造 cmdRegistry
+├── CortexModel.java           改: 加 cmdRegistry + completion 字段, 构造 cmdRegistry
 ├── Styles.java + MarkdownRenderer.java             改: render() 中插入补全菜单渲染
-├── Resume.java           改: 将 handleResume 函数体迁到 MewCodeModel.openResumeMenu() 方法, 文件仍在 tui/Resume.java; 删除老 handleResume
-└── MewCodeModelTest.java       改: 旧的 TestTuiSlashCompactRoutesToCommand 等用例迁到新分发器
+├── Resume.java           改: 将 handleResume 函数体迁到 CortexModel.openResumeMenu() 方法, 文件仍在 tui/Resume.java; 删除老 handleResume
+└── CortexModelTest.java       改: 旧的 TestTuiSlashCompactRoutesToCommand 等用例迁到新分发器
 
-src/main/java/com/mewcode/agent/SessionRuntime.java  改: 新增 resetForNewSession(sesCtx); clearAndNewSession 调用此 helper 重置 compact 子状态
+src/main/java/com/cortex/agent/SessionRuntime.java  改: 新增 resetForNewSession(sesCtx); clearAndNewSession 调用此 helper 重置 compact 子状态
 
-src/main/java/com/mewcode/MewCode.java   不变 (MewCodeModel 构造时内部 wire cmdRegistry)
-src/main/java/com/mewcode/prompt/Prompt.java    READY_HINT 由"硬编码列表" 改为"建议输入 /help 查看可用命令" (去掉与命令清单同步的负担)
-src/test/java/dev/mewcode/prompt/PromptTest.java  改: 跟随 READY_HINT 文案调整断言
+src/main/java/com/cortex/Cortex.java   不变 (CortexModel 构造时内部 wire cmdRegistry)
+src/main/java/com/cortex/prompt/Prompt.java    READY_HINT 由"硬编码列表" 改为"建议输入 /help 查看可用命令" (去掉与命令清单同步的负担)
+src/test/java/dev/cortex/prompt/PromptTest.java  改: 跟随 READY_HINT 文案调整断言
 ```
 
 ## 技术决策
 
 | 决策点 | 选择 | 理由 |
 |---|---|---|
-| 命令系统包归属 | 新建 `com.mewcode.command`,不留在 `com.mewcode.tui` | tui 内 handler 持有 `MewCodeModel` 引用紧耦合,要满足 G3 必须把命令逻辑搬出 tui 包 |
+| 命令系统包归属 | 新建 `com.cortex.command`,不留在 `com.cortex.tui` | tui 内 handler 持有 `CortexModel` 引用紧耦合,要满足 G3 必须把命令逻辑搬出 tui 包 |
 | 注册方式 | 显式 `Builtins.registerAll(reg)`,不用 static 初始化副作用 | 测试时能用空 registry,启动顺序明确,易做单测 |
 | 冲突检测 | `register` 内部抛 `IllegalStateException`,信息含具体名字/别名 | 失败快,启动期就报,不会进入运行时 |
-| Handler 函数签名 | `Handler { void handle(AtomicBoolean cancelled, Ui ui) throws Exception; }` 而非 `Function<MewCodeModel, Runnable>` | 满足 G3 解耦；handler 抛 non-null 异常时,`dispatchSlash` 自动把 `errorBlock(ex.getMessage())` 追加到 `pendingPrintln`,无需 handler 显式调 `ui.error` 用户也能看到失败 |
+| Handler 函数签名 | `Handler { void handle(AtomicBoolean cancelled, Ui ui) throws Exception; }` 而非 `Function<CortexModel, Runnable>` | 满足 G3 解耦；handler 抛 non-null 异常时,`dispatchSlash` 自动把 `errorBlock(ex.getMessage())` 追加到 `pendingPrintln`,无需 handler 显式调 `ui.error` 用户也能看到失败 |
 | Idle 守护规则 | `dispatchSlash` 在调用 handler 前根据 Kind 判定：`Kind.UI` 与 `Kind.PROMPT` 命令在非 idle 状态拒绝（直接 errorBlock 提示）；`Kind.LOCAL` 命令任何状态都可执行 | handler 不再单独检查 `ui.idle()` |
-| Ui 与 GUI 线程衔接 | 通过 `MewCodeModel` 内部 `pendingAction: Runnable` 字段缓冲,handler 返回后用 `program.send(new AgentEventMessage(pendingAction)` | Ui 接口方法保持无返回值,handler 写线性代码；`dispatchSlash` 在 handler 返回后调度到 GUI 线程 |
+| Ui 与 GUI 线程衔接 | 通过 `CortexModel` 内部 `pendingAction: Runnable` 字段缓冲,handler 返回后用 `program.send(new AgentEventMessage(pendingAction)` | Ui 接口方法保持无返回值,handler 写线性代码；`dispatchSlash` 在 handler 返回后调度到 GUI 线程 |
 | Kind 与"是否进 history" | `Kind.PROMPT` = 调 `injectAndSend`；Kind 仅是元数据,实际行为靠 handler 主动调用 | 避免把"是否注入"做成隐式行为；由 handler 显式表达意图,可读 |
 | 别名匹配范围 | dispatcher 命中（主名 + 别名都进 byName）；补全菜单仅按主名前缀 | 别名是输入快捷,补全是发现机制,语义不同；本期 12 条命令暂不填别名 |
 | 补全菜单实现 | 自实现 inline 渲染（JLine/tui.tea `Label` 多行）,不用 JLine/tui.tea 内置 `ActionListBox` 弹出 | `ActionListBox` 弹出 Window 占满主屏与产品图不符；inline 多行字符串渲染足够 |
@@ -365,9 +365,9 @@ src/test/java/dev/mewcode/prompt/PromptTest.java  改: 跟随 READY_HINT 文案�
 | 老命令收编 | 一次性把 5 条旧 handler 重写为基于 `Ui` 接口的新 handler；不保留过渡 | 双轨维护成本高于一次性重写 |
 | /resume 状态机 | `Ui.openResumeMenu` 内部仍由 tui 包持有 `SessionState` 与 `ActionListBox` | 避免 command 包知道 JLine/tui.tea 类型；ch09 行为完全保留 |
 | /clear 实现 | close 旧 writer → 用 `ContextCompactor.newSessionContext` 构造新 `SessionContext` → 用 `Session.openWriter` 打开新 writer → 重新构造 `new Conversation(onAppend, onReplace)`（onAppend 闭包重新捕获新 writer）→ `runtime.resetForNewSession(...)` → `iter=0; usageIn=0; usageOut=0` | 旧 writer 关闭后其 hook 已失效,必须重建 conversation 才能挂上新 writer；旧 JSONL 文件保留,/resume 仍能看到 |
-| /memory 数据源 | `Ui.memoryFiles()` 由 `MewCodeModel` 委托给已有的 `memoryManager` | 不重做记忆加载,只新增"列文件名"查询路径 |
+| /memory 数据源 | `Ui.memoryFiles()` 由 `CortexModel` 委托给已有的 `memoryManager` | 不重做记忆加载,只新增"列文件名"查询路径 |
 | /status 字段渲染 | 6 行 key:value 两列对齐（key 用 `String.format("%-10s", ...)` 右补空格）；Mode 用 `Mode.toString()`；`modelName` 来源为 `provider.model()`（provider 为 null 时返回空串）,与 status bar 取 model name 的来源一致,不读 engine | `Mode.toString()` 已是 camelCase（default/plan/acceptEdits/bypassPermissions）与设计图一致 |
-| toolCount 数据源 | `Ui.toolCount()` 由 `MewCodeModel` 委托给 `toolRegistry.count()`,即 `ToolRegistry` 已有（若不存在则本期新增）的 O(1) 方法 | 与 `cmdRegistry` 字段无关,二者并存 |
+| toolCount 数据源 | `Ui.toolCount()` 由 `CortexModel` 委托给 `toolRegistry.count()`,即 `ToolRegistry` 已有（若不存在则本期新增）的 O(1) 方法 | 与 `cmdRegistry` 字段无关,二者并存 |
 | 未命中提示文本 | "未知命令: /<name>。输入 /help 查看可用命令" | 唯一硬编码字符串；集中在 `Commands.java` 中 |
 | READY_HINT 处理 | 改为通用引导文案（"准备好了,输入 /help 查看命令"）,不再列具体命令名 | 消除 N7 要求的"硬编码命令清单" |
 | 状态栏改动 | 不动 | N11 要求 |

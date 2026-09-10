@@ -6,27 +6,27 @@
 
 | 操作 | 文件                                                                                                       | 职责                                                                                                   |
 | ---- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| 修改 | `src/main/java/com/mewcode/llm/StreamEvent.java`                                                           | sealed 新增 `UsageEvent`；新增 `Usage` record                                                          |
-| 修改 | `src/main/java/com/mewcode/llm/Provider.java`                                                              | `stream` 加 `String systemSuffix` 形参                                                                 |
-| 修改 | `src/main/java/com/mewcode/llm/AnthropicProvider.java`                                                     | `effectiveSystem(suffix)`；流结束上抛 `UsageEvent`                                                     |
-| 修改 | `src/main/java/com/mewcode/llm/OpenAIProvider.java`                                                        | `streamOptions.includeUsage(true)`；`toOpenAIMessages` 拼 `suffix`；上抛 `UsageEvent`                  |
-| 修改 | `src/main/java/com/mewcode/tool/Tool.java`                                                                 | 接口加 `boolean readOnly()`                                                                            |
-| 修改 | `src/main/java/com/mewcode/tool/Registry.java`                                                             | `readOnlyDefinitions`、`isReadOnly`                                                                    |
-| 修改 | `src/main/java/com/mewcode/tool/{ReadFileTool,WriteFileTool,EditFileTool,BashTool,GlobTool,GrepTool}.java` | 各加 `readOnly()`                                                                                      |
-| 修改 | `src/main/java/com/mewcode/conversation/Conversation.java`                                                 | `lastRole()`                                                                                           |
-| 修改 | `src/main/java/com/mewcode/prompt/Prompt.java`                                                             | `PLAN_MODE_REMINDER`、`EXECUTE_DIRECTIVE`；`SYSTEM_PROMPT` 增循环约定                                  |
-| 重写 | `src/main/java/com/mewcode/agent/Agent.java`                                                               | ReAct 循环、`Mode`、`executeBatched`、`UsageReport`/`Iter`/`Notice` 事件、历史收尾                     |
-| 修改 | `src/main/java/com/mewcode/agent/Event.java`                                                               | sealed 新增 `UsageReport`、`Iter`、`Notice` 子类型；新增 `Usage` record                                |
-| 新建 | `src/main/java/com/mewcode/agent/Mode.java`                                                                | `enum Mode { NORMAL, PLAN }`                                                                           |
-| 新建 | `src/main/java/com/mewcode/agent/CancelToken.java`                                                         | per-turn 取消句柄（volatile + 派生 timeout + 可选回调）                                                |
-| 重写 | `src/test/java/dev/mewcode/agent/AgentTest.java`                                                           | 多轮 fake provider、并发分批、停止条件、Plan 工具集                                                    |
-| 修改 | `src/test/java/dev/mewcode/conversation/ConversationTest.java`                                             | `lastRole` 断言                                                                                        |
-| 修改 | `src/main/java/com/mewcode/tui/{MewCodeModel,AgentEvent 队列,View}.java`                                   | `mode`、per-turn cancel、Esc/Ctrl+C、`/plan /do`、`UsageReport`/`Iter`/`Notice`/多工具、状态栏、动态区 |
-| 修改 | `src/test/java/dev/mewcode/smoke/SmokeMewCode.java`                                                        | `Agent.run` 调用处补 `Mode` 与 `CancelToken` 实参（`Mode.NORMAL`）                                     |
+| 修改 | `src/main/java/com/cortex/llm/StreamEvent.java`                                                           | sealed 新增 `UsageEvent`；新增 `Usage` record                                                          |
+| 修改 | `src/main/java/com/cortex/llm/Provider.java`                                                              | `stream` 加 `String systemSuffix` 形参                                                                 |
+| 修改 | `src/main/java/com/cortex/llm/AnthropicProvider.java`                                                     | `effectiveSystem(suffix)`；流结束上抛 `UsageEvent`                                                     |
+| 修改 | `src/main/java/com/cortex/llm/OpenAIProvider.java`                                                        | `streamOptions.includeUsage(true)`；`toOpenAIMessages` 拼 `suffix`；上抛 `UsageEvent`                  |
+| 修改 | `src/main/java/com/cortex/tool/Tool.java`                                                                 | 接口加 `boolean readOnly()`                                                                            |
+| 修改 | `src/main/java/com/cortex/tool/Registry.java`                                                             | `readOnlyDefinitions`、`isReadOnly`                                                                    |
+| 修改 | `src/main/java/com/cortex/tool/{ReadFileTool,WriteFileTool,EditFileTool,BashTool,GlobTool,GrepTool}.java` | 各加 `readOnly()`                                                                                      |
+| 修改 | `src/main/java/com/cortex/conversation/Conversation.java`                                                 | `lastRole()`                                                                                           |
+| 修改 | `src/main/java/com/cortex/prompt/Prompt.java`                                                             | `PLAN_MODE_REMINDER`、`EXECUTE_DIRECTIVE`；`SYSTEM_PROMPT` 增循环约定                                  |
+| 重写 | `src/main/java/com/cortex/agent/Agent.java`                                                               | ReAct 循环、`Mode`、`executeBatched`、`UsageReport`/`Iter`/`Notice` 事件、历史收尾                     |
+| 修改 | `src/main/java/com/cortex/agent/Event.java`                                                               | sealed 新增 `UsageReport`、`Iter`、`Notice` 子类型；新增 `Usage` record                                |
+| 新建 | `src/main/java/com/cortex/agent/Mode.java`                                                                | `enum Mode { NORMAL, PLAN }`                                                                           |
+| 新建 | `src/main/java/com/cortex/agent/CancelToken.java`                                                         | per-turn 取消句柄（volatile + 派生 timeout + 可选回调）                                                |
+| 重写 | `src/test/java/dev/cortex/agent/AgentTest.java`                                                           | 多轮 fake provider、并发分批、停止条件、Plan 工具集                                                    |
+| 修改 | `src/test/java/dev/cortex/conversation/ConversationTest.java`                                             | `lastRole` 断言                                                                                        |
+| 修改 | `src/main/java/com/cortex/tui/{CortexModel,AgentEvent 队列,View}.java`                                   | `mode`、per-turn cancel、Esc/Ctrl+C、`/plan /do`、`UsageReport`/`Iter`/`Notice`/多工具、状态栏、动态区 |
+| 修改 | `src/test/java/dev/cortex/smoke/SmokeCortex.java`                                                        | `Agent.run` 调用处补 `Mode` 与 `CancelToken` 实参（`Mode.NORMAL`）                                     |
 
 ## T1: llm 新增 Usage record + UsageEvent（纯增量）
 
-**文件：** `src/main/java/com/mewcode/llm/StreamEvent.java`、`src/main/java/com/mewcode/llm/Usage.java`
+**文件：** `src/main/java/com/cortex/llm/StreamEvent.java`、`src/main/java/com/cortex/llm/Usage.java`
 **依赖：** 无
 **步骤：**
 
@@ -37,7 +37,7 @@
 
 ## T2: tool 只读分类
 
-**文件：** `src/main/java/com/mewcode/tool/Tool.java`、`src/main/java/com/mewcode/tool/Registry.java`、`src/main/java/com/mewcode/tool/{ReadFileTool,WriteFileTool,EditFileTool,BashTool,GlobTool,GrepTool}.java`
+**文件：** `src/main/java/com/cortex/tool/Tool.java`、`src/main/java/com/cortex/tool/Registry.java`、`src/main/java/com/cortex/tool/{ReadFileTool,WriteFileTool,EditFileTool,BashTool,GlobTool,GrepTool}.java`
 **依赖：** 无
 **步骤：**
 
@@ -47,11 +47,11 @@
    - `public List<Map<String, Object>/*tool schema*/> readOnlyDefinitions()`：仿 `definitions()` 按注册顺序遍历，仅收 `tools.get(name).readOnly()==true` 的项。
    - `public boolean isReadOnly(String name)`：`Optional<Tool> t = get(name); return t.isPresent() && t.get().readOnly();`。
 
-**验证：** `./gradlew compileJava`；`./gradlew -q test -Dtest='com.mewcode.tool.*'` 不回归（接口加方法后 6 工具均实现，编译即证明完整）。
+**验证：** `./gradlew compileJava`；`./gradlew -q test -Dtest='com.cortex.tool.*'` 不回归（接口加方法后 6 工具均实现，编译即证明完整）。
 
 ## T3: Conversation.lastRole
 
-**文件：** `src/main/java/com/mewcode/conversation/Conversation.java`、`src/test/java/dev/mewcode/conversation/ConversationTest.java`
+**文件：** `src/main/java/com/cortex/conversation/Conversation.java`、`src/test/java/dev/cortex/conversation/ConversationTest.java`
 **依赖：** 无
 **步骤：**
 
@@ -62,7 +62,7 @@
 
 ## T4: prompt 计划态提示与循环约定
 
-**文件：** `src/main/java/com/mewcode/prompt/Prompt.java`
+**文件：** `src/main/java/com/cortex/prompt/Prompt.java`
 **依赖：** 无
 **步骤：**
 
@@ -75,7 +75,7 @@
 
 ## T5: llm stream 加 systemSuffix + 用量上抛
 
-**文件：** `src/main/java/com/mewcode/llm/Provider.java`、`src/main/java/com/mewcode/llm/AnthropicProvider.java`、`src/main/java/com/mewcode/llm/OpenAIProvider.java`、`src/main/java/com/mewcode/agent/Agent.java`（临时补参）
+**文件：** `src/main/java/com/cortex/llm/Provider.java`、`src/main/java/com/cortex/llm/AnthropicProvider.java`、`src/main/java/com/cortex/llm/OpenAIProvider.java`、`src/main/java/com/cortex/agent/Agent.java`（临时补参）
 **依赖：** T1
 **步骤：**
 
@@ -91,11 +91,11 @@
 
 > 说明：`SmokeMain` 走 `Agent.run`、不直接调 `stream`，本步不动它（其 `run` 调用在 T7 随 `mode` / `cancel` 形参一并更新）。`AgentTest.FakeProvider#stream` 也实现该接口，本步之后它会编译失败——这是预期的，T6 重写 `AgentTest` 时一并补 `systemSuffix` 形参；因此本步**不要**跑 `./gradlew -q test -Dtest=AgentTest`。
 
-**验证：** `./gradlew -q -DskipTests compile` 通过（主源码绿）；`./gradlew -q test -Dtest='com.mewcode.llm.*'` 不回归；用 `./gradlew exec:java -Dexec.mainClass=com.mewcode.MewCode` 发一条纯文本回复正常（用量已随流上抛，旧 agent 暂未消费）。
+**验证：** `./gradlew -q -DskipTests compile` 通过（主源码绿）；`./gradlew -q test -Dtest='com.cortex.llm.*'` 不回归；用 `./gradlew exec:java -Dexec.mainClass=com.cortex.Cortex` 发一条纯文本回复正常（用量已随流上抛，旧 agent 暂未消费）。
 
 ## T6: agent ReAct 循环重写
 
-**文件：** `src/main/java/com/mewcode/agent/Agent.java`、`src/main/java/com/mewcode/agent/Event.java`、`src/main/java/com/mewcode/agent/Mode.java`、`src/main/java/com/mewcode/agent/CancelToken.java`、`src/test/java/dev/mewcode/agent/AgentTest.java`
+**文件：** `src/main/java/com/cortex/agent/Agent.java`、`src/main/java/com/cortex/agent/Event.java`、`src/main/java/com/cortex/agent/Mode.java`、`src/main/java/com/cortex/agent/CancelToken.java`、`src/test/java/dev/cortex/agent/AgentTest.java`
 **依赖：** T1, T2, T3, T4, T5
 **步骤：**
 
@@ -122,15 +122,15 @@
 
 ## T7: tui 接入 Agent Loop + 收尾 `run` 调用方
 
-**文件：** `src/main/java/com/mewcode/tui/MewCodeModel.java`、`src/main/java/com/mewcode/tui/AgentEvent 队列.java`、`src/main/java/com/mewcode/tui/Styles.java + MarkdownRenderer.java`、`src/test/java/dev/mewcode/smoke/SmokeMewCode.java`
+**文件：** `src/main/java/com/cortex/tui/CortexModel.java`、`src/main/java/com/cortex/tui/AgentEvent 队列.java`、`src/main/java/com/cortex/tui/Styles.java + MarkdownRenderer.java`、`src/test/java/dev/cortex/smoke/SmokeCortex.java`
 **依赖：** T4, T6
-**说明：** T6 改了 `Agent.run` 签名（加 `mode` 与 `cancel`），其调用方 `tui/AgentEvent 队列`（或 `MewCodeModel.onSubmit`）与 `SmokeMain` 在此步同步更新——本步完成后 `./gradlew shadowJar` 才在**仓库级**重新转绿（T6 后只保证 agent 包及其测试绿）。
+**说明：** T6 改了 `Agent.run` 签名（加 `mode` 与 `cancel`），其调用方 `tui/AgentEvent 队列`（或 `CortexModel.onSubmit`）与 `SmokeMain` 在此步同步更新——本步完成后 `./gradlew shadowJar` 才在**仓库级**重新转绿（T6 后只保证 agent 包及其测试绿）。
 **步骤：**
 
-1. `MewCodeModel.java`：
+1. `CortexModel.java`：
    - 新增字段：`Mode mode = Mode.NORMAL;`、`int iter;`、`long usageIn;`、`long usageOut;`、`List<ToolDisplay> curTools = new ArrayList<>();`（移除单个 `curTool`）、`CancelToken turnCancel;`。
    - JLine/tui.tea `KeyStroke` 拦截：`Ctrl+C` → `SessionState.STREAMING` 时 `turnCancel.cancel()`（不退出，等 onComplete）/ 否则 `screen.stopScreen(); System.exit(0);`；新增 `Esc` → `SessionState.STREAMING` 时 `turnCancel.cancel()`。
-2. `AgentEvent 队列.java`（兼 `MewCodeModel.onSubmit`）：
+2. `AgentEvent 队列.java`（兼 `CortexModel.onSubmit`）：
    - `onSubmit`：识别 `/exit`（退出）、`/plan`（`mode=Mode.PLAN`、提示块、回 IDLE）、`/do`（`mode=Mode.NORMAL`、`conv.addUser(Prompt.EXECUTE_DIRECTIVE)`、走启动流程）、普通文本（`conv.addUser`）。启动处：`turnCancel = new CancelToken()`；`BlockingQueue<AgentEvent> events = new Agent(client, registry, protocol, selectedProvider).run(conv, mode, turnCancel)`；`events.subscribe(this)`；`iter=0`；`state=SessionState.STREAMING`。
    - `onNext(event)`：通过 `program.send(new AgentEventMessage(...)` 切回 GUI 线程，按 plan 分派顺序处理（switch pattern match）`Failed` / `Tool` / `UsageReport`（累加 `usageIn`/`usageOut`）/ `Notice`（灰提示块）/ `Iter`（set `this.iter`）/ `Done` / `TextDelta`；`Tool.Phase.START` 追加 `curTools`（首个工具前先提交 preamble）、`Phase.END` 从 `curTools` 移除队首并按序 append 工具行 + 结果摘要到 scrollback。
    - `onComplete` / `onError`：兜底 `finishTurn()`。
@@ -138,7 +138,7 @@
 3. `Styles.java + MarkdownRenderer.java`：
    - `statusBar`：左侧 provider 名后在 `Mode.PLAN` 时附「PLAN」徽标；右侧 model 名旁附 `↑{in} ↓{out} tok`（紧凑数字，如 `1.2k`）。
    - 流式动态区：`curTools` 非空逐行渲染 `● name(args)` Running…；否则「Imagining… (Ns · 第 N 轮)」（`iter>0` 附轮次）。
-4. `SmokeMewCode.java`：`new Agent(client, registry, protocol, selectedProvider).run(conv)` 调用补 `mode` 与 `cancel` 实参 → `agent.run(conv, Mode.NORMAL, new CancelToken())`（保持其调试用途，不需感知 plan / 取消）。
+4. `SmokeCortex.java`：`new Agent(client, registry, protocol, selectedProvider).run(conv)` 调用补 `mode` 与 `cancel` 实参 → `agent.run(conv, Mode.NORMAL, new CancelToken())`（保持其调试用途，不需感知 plan / 取消）。
 
 **验证：** `./gradlew shadowJar`（仓库级转绿）；`./gradlew -q test`（无新增测试，但需保证未回归）；`./gradlew compileJava` (代码风格由 IDE 保证) 通过（如启用）。
 
@@ -148,8 +148,8 @@
 **依赖：** T1–T7
 **步骤：**
 
-1. `./gradlew compileJava` (代码风格由 IDE 保证)（google-java-format 合规）；`./gradlew shadowJar`；`./gradlew -q test`；`./gradlew -q test -Dtest='com.mewcode.agent.*,com.mewcode.tool.*'`（再跑一次锁住 N6 关键包）。
-2. 端到端（openai 兼容端点，用 `.mewcode/config.yaml`）：
+1. `./gradlew compileJava` (代码风格由 IDE 保证)（google-java-format 合规）；`./gradlew shadowJar`；`./gradlew -q test`；`./gradlew -q test -Dtest='com.cortex.agent.*,com.cortex.tool.*'`（再跑一次锁住 N6 关键包）。
+2. 端到端（openai 兼容端点，用 `.cortex/config.yaml`）：
    - 多轮（AC1）：问「读 `docs/ch03/spec.md`，再据其内容新建 `docs/ch03/summary.txt` 写一句话摘要」→ 观察 read_file → write_file 跨多轮自动连环、状态栏用量增长、动态区轮次递增、最终答复。
    - 取消（AC10）：发一个会跑多步的任务，中途按 Esc / Ctrl+C → 回空闲态不退出 → 再正常发一条继续对话（验证历史未坏）。
    - 流出错（AC5）：临时改坏 `base_url` 或断网发一条 → 错误提示、程序不退出、改回后继续。

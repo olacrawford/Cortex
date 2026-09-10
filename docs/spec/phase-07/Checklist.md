@@ -1,18 +1,20 @@
 # 上下文管理 Checklist
 
+> **状态说明**：本阶段功能已全部实现，并通过全量单元测试与后续阶段的 tmux E2E 复验；本清单勾选状态未随开发维护，未勾选不代表未实现。
+
 > 每一项通过运行代码或观察行为来验证,聚焦系统行为。
 
 ## 实现完整性
 
 ### 包与目录结构
 
-- [ ] **C1**:`src/main/java/com/mewcode/compact/` 目录存在,可被其他包引用。
-  - 验证:`ls src/main/java/com/mewcode/compact/` 列出 `ContextCompactor.java` / `// (Layer 1/2 都在 ContextCompactor.java 内)` / `// (Layer 1/2 都在 ContextCompactor.java 内)` / `SummaryPrompt.java` / `Recovery.java` / `Token.java` / `CompactConstants.java` / `CompactException.java` 等核心文件,外加 `state/` 子目录下的 `ContentReplacementState.java` / `AutoCompactTrackingState.java` / `SessionContext.java`,以及 `src/test/java/dev/mewcode/compact/` 下各自的 `*Test.java`。
+- [ ] **C1**:`src/main/java/com/cortex/compact/` 目录存在,可被其他包引用。
+  - 验证:`ls src/main/java/com/cortex/compact/` 列出 `ContextCompactor.java` / `// (Layer 1/2 都在 ContextCompactor.java 内)` / `// (Layer 1/2 都在 ContextCompactor.java 内)` / `SummaryPrompt.java` / `Recovery.java` / `Token.java` / `CompactConstants.java` / `CompactException.java` 等核心文件,外加 `state/` 子目录下的 `ContentReplacementState.java` / `AutoCompactTrackingState.java` / `SessionContext.java`,以及 `src/test/java/dev/cortex/compact/` 下各自的 `*Test.java`。
   - 验证:`./gradlew compileJava` 退出码 0,无未解析符号。
 
 - [ ] **C2**:常量集中在 `CompactConstants.java`,未散落到其他文件。
-  - 验证:在 `src/main/java/com/mewcode/compact/` 内执行 `grep -rn "= 50000\|= 200000\|= 20000\|= 13000\|= 3000\|= 10000"` 命中点全部在 `CompactConstants.java`。
-  - 验证:`DEFAULT_ANTHROPIC_CONTEXT_WINDOW` 与 `DEFAULT_OPENAI_CONTEXT_WINDOW` 是 `public static final` 常量,定义在 `com.mewcode.config.ProtocolDefaults`,可被 config 包引用。
+  - 验证:在 `src/main/java/com/cortex/compact/` 内执行 `grep -rn "= 50000\|= 200000\|= 20000\|= 13000\|= 3000\|= 10000"` 命中点全部在 `CompactConstants.java`。
+  - 验证:`DEFAULT_ANTHROPIC_CONTEXT_WINDOW` 与 `DEFAULT_OPENAI_CONTEXT_WINDOW` 是 `public static final` 常量,定义在 `com.cortex.config.ProtocolDefaults`,可被 config 包引用。
 
 ### 状态对象
 
@@ -79,8 +81,8 @@
 
 ### 紧急压缩与哨兵异常
 
-- [ ] **C16**:`com.mewcode.llm.PromptTooLongException` 哨兵异常存在并被 provider 包装。
-  - 验证:`grep -rn PromptTooLongException src/main/java/com/mewcode/llm/` 命中。
+- [ ] **C16**:`com.cortex.llm.PromptTooLongException` 哨兵异常存在并被 provider 包装。
+  - 验证:`grep -rn PromptTooLongException src/main/java/com/cortex/llm/` 命中。
   - 验证:编写专门的 provider PTL 包装单元测试 `testAnthropicProviderWrapsPromptTooLong` / `testOpenAIProviderWrapsPromptTooLong`:模拟 provider 返回上下文过长的原始错误,断言 `AgentEvent.ErrorEvent.error() instanceof PromptTooLongException` 为 true;对非 PTL 错误(500 等)断言为 false(验证用 `cause` 链)。
 
 ### 配置
@@ -130,7 +132,7 @@
 ### compact 与 tui
 
 - [ ] **I7**:TUI 命令分发表注册四项(迁移现有 `/exit` / `/plan` / `/do` + 新增 `/compact`)。
-  - 验证:`grep -n "/compact\|/exit\|/plan\|/do" src/main/java/com/mewcode/tui/Commands.java` 命中四项;`BUILTIN_COMMANDS.size() == 4`。
+  - 验证:`grep -n "/compact\|/exit\|/plan\|/do" src/main/java/com/cortex/tui/Commands.java` 命中四项;`BUILTIN_COMMANDS.size() == 4`。
   - 验证:输入 `/anything-else` 走未知命令路径,提示包含可用命令列表。
   - 验证:迁移后 `/exit` 仍然退出;`/plan` 仍然切 plan 模式;`/do` 仍然切 default 模式并启动一轮 run。
 
@@ -144,17 +146,17 @@
 
 ### compact 与 config
 
-- [ ] **I9**:`com.mewcode.MewCode` 启动时把 `effectiveContextWindow()` 注入到 Agent。
-  - 验证:跑 `java -jar build/libs/mewcode.jar` 并配置 anthropic provider 不带 context_window → Agent 字段拿到 200000。
+- [ ] **I9**:`com.cortex.Cortex` 启动时把 `effectiveContextWindow()` 注入到 Agent。
+  - 验证:跑 `java -jar build/libs/cortex.jar` 并配置 anthropic provider 不带 context_window → Agent 字段拿到 200000。
   - 验证:把 `context_window: 100000` 加入配置 → Agent 字段拿到 100000。
 
-- [ ] **I10**:`.mewcode/config.yaml.example` 展示新字段用法与默认值注释。
+- [ ] **I10**:`.cortex/config.yaml.example` 展示新字段用法与默认值注释。
   - 验证:打开示例文件,看到 `context_window: 200000` 之类的字段和 "可选;未配置时按 protocol 默认" 注释。
 
 ### 会话目录
 
-- [ ] **I11**:进程启动后 `.mewcode/sessions/<id>/tool-results/` 物理目录被创建。
-  - 验证:启动 mewcode 后 `ls .mewcode/sessions/` 出现新子目录;子目录名形如 `<unix_ts>-<hex>`。
+- [ ] **I11**:进程启动后 `.cortex/sessions/<id>/tool-results/` 物理目录被创建。
+  - 验证:启动 cortex 后 `ls .cortex/sessions/` 出现新子目录;子目录名形如 `<unix_ts>-<hex>`。
   - 验证:进程退出后该目录依然保留,下次启动会再开一个新的子目录。
 
 ### Compact 状态事件路由(兑现 spec F24a / F24b)
@@ -180,7 +182,7 @@
 
 - [ ] **B4**:import 分组遵循 google-java-format:JDK / 第三方 / 本地包三段,组间空行隔开。
 
-- [ ] **B5**:`./gradlew -q test -Dtest='com.mewcode.compact.*'` 全部通过。覆盖:
+- [ ] **B5**:`./gradlew -q test -Dtest='com.cortex.compact.*'` 全部通过。覆盖:
   - 状态对象(决策冻结、并发安全)
   - token 估算(锚点 + 字符增量、usage 合并)
   - 第 1 层(单条 / 聚合 / 幂等 / 决策冻结 / 落盘失败降级)
@@ -197,16 +199,16 @@
 
 - [ ] **B9**:`./gradlew -q test -Dtest='AgentTest'` 通过;新增"紧急压缩成功"与"紧急压缩后再次 PTL 上抛"两个用例。
 
-- [ ] **B10**:`./gradlew -q test -Dtest='MewCodeModelTest'` 通过;`/compact` 走命令路径与 `/unknown` 友好提示两个用例。
+- [ ] **B10**:`./gradlew -q test -Dtest='CortexModelTest'` 通过;`/compact` 走命令路径与 `/unknown` 友好提示两个用例。
 
 - [ ] **B11**:注释不出现"参考"、"取自"、"对齐"、"mirror"、"镜像"、"Go 实现"等外部引用语。
-  - 验证:`grep -rn "参考\|取自\|对齐.*实现\|mirror\|镜像\|Go 实现\|Golang 实现\|TS 实现\|TypeScript 实现\|as in\|课程实现\|README" src/main/java/com/mewcode/compact/ src/main/java/com/mewcode/agent/ src/main/java/com/mewcode/conversation/ src/main/java/com/mewcode/llm/ src/main/java/com/mewcode/tui/ src/main/java/com/mewcode/config/` 全部无命中。
+  - 验证:`grep -rn "参考\|取自\|对齐.*实现\|mirror\|镜像\|Go 实现\|Golang 实现\|TS 实现\|TypeScript 实现\|as in\|课程实现\|README" src/main/java/com/cortex/compact/ src/main/java/com/cortex/agent/ src/main/java/com/cortex/conversation/ src/main/java/com/cortex/llm/ src/main/java/com/cortex/tui/ src/main/java/com/cortex/config/` 全部无命中。
 
 - [ ] **BB1**:文档自检——spec / plan / task / checklist 本身也不出现外部引用语。
   - 验证:`grep -rnE --exclude=checklist.md "取自 ch|取自 README|参考课程|参考 Claude|参考 TS|参考 Type|对齐 ch|对齐课程|对齐.*实现|镜像实现|as in " docs/java/ch08/` 无命中。模式只匹配具体短语;`--exclude=checklist.md` 排除自身,避免本条 BB1 与 B11 把正则模式当字符串列出后构成 self-fire。
 
-- [ ] **B12**:`.mewcode/config.yaml.example` 可被解析。
-  - 验证:编写一个测试 fixture,SnakeYAML Engine 把 `.mewcode/config.yaml.example` 解析到 `Config` 不抛;`ConfigLoader.validate()` 通过;新增的 `contextWindow` 字段在解码后非零。
+- [ ] **B12**:`.cortex/config.yaml.example` 可被解析。
+  - 验证:编写一个测试 fixture,SnakeYAML Engine 把 `.cortex/config.yaml.example` 解析到 `Config` 不抛;`ConfigLoader.validate()` 通过;新增的 `contextWindow` 字段在解码后非零。
 
 ---
 
@@ -221,7 +223,7 @@
 ### 场景 E2:单条大工具结果
 
 - [ ] **触发**:FakeProvider 一轮返回一个工具调用,工具回填 80KB(80000 字节)字符串。
-- [ ] **预期**:下一轮 stream 请求 messages 中该工具结果 content 已被替换为预览体,通过 4 条 `String.contains` 断言:① 包含 `original size:` 子串与字节数("80000");② 包含 `[saved to]` 与 spillDir 尾段路径片段;③ 包含 `head preview` 标记;④ 包含 `文件读取工具` 与 `不要凭头部预览猜测` 两个关键短语。`.mewcode/sessions/<id>/tool-results/<tool_use_id>` 文件存在且 `Files.size(...) == 80000` 字节。
+- [ ] **预期**:下一轮 stream 请求 messages 中该工具结果 content 已被替换为预览体,通过 4 条 `String.contains` 断言:① 包含 `original size:` 子串与字节数("80000");② 包含 `[saved to]` 与 spillDir 尾段路径片段;③ 包含 `head preview` 标记;④ 包含 `文件读取工具` 与 `不要凭头部预览猜测` 两个关键短语。`.cortex/sessions/<id>/tool-results/<tool_use_id>` 文件存在且 `Files.size(...) == 80000` 字节。
 - [ ] **观察方式**:用 FakeProvider 捕获第 N+1 次 stream 请求体,检查 content 字段;用 `Files.size` 检查落盘文件大小。
 
 ### 场景 E3:单轮聚合超标
@@ -302,15 +304,15 @@
 
 ### 场景 E12:tmux 真实运行
 
-- [ ] **触发**:`./gradlew shadowJar`,在 tmux 中启动 `java -jar build/libs/mewcode.jar`,配置 anthropic provider。
+- [ ] **触发**:`./gradlew shadowJar`,在 tmux 中启动 `java -jar build/libs/cortex.jar`,配置 anthropic provider。
 - [ ] **预期**:
-  - 让 Agent 读一个 80KB 的本地文件 → `.mewcode/sessions/<id>/tool-results/` 下出现该工具调用 ID 的文件;
+  - 让 Agent 读一个 80KB 的本地文件 → `.cortex/sessions/<id>/tool-results/` 下出现该工具调用 ID 的文件;
   - 把 context_window 临时改成 80000(**不能低于 33000**,否则 80000 - 33000 = 47000 是负数会让自动压缩在每轮都触发,无法验证真实压缩信号),连续几轮对话后看到自动压缩日志;
   - 任意时刻输入 `/compact` 看到系统消息 `已压缩,token 从 X 降至 Y`;
   - 输入 `/unknown` 看到友好提示,未发 LLM;
   - 输入 `/exit` / `/plan` / `/do` 行为与本章迁移前一致;
-  - 进程退出后 `.mewcode/sessions/<id>/` 仍存在,下次启动再开新子目录。
-- [ ] **观察方式**:tmux 中目测;用 `ls .mewcode/sessions/` 与 `cat` 抽查落盘文件;`git status` 干净(覆盖 .gitignore)。
+  - 进程退出后 `.cortex/sessions/<id>/` 仍存在,下次启动再开新子目录。
+- [ ] **观察方式**:tmux 中目测;用 `ls .cortex/sessions/` 与 `cat` 抽查落盘文件;`git status` 干净(覆盖 .gitignore)。
 
 ### 场景 E13:自动压缩 UX 状态提示(兑现 spec F24a)
 

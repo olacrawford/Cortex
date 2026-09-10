@@ -4,7 +4,7 @@
 >
 > 验证记录（2026-09-09，feature/phase06）：mcp 包单测（ConfigLoader/McpTool/McpManager）全绿；
 > tmux E2E 用真实官方 server `@modelcontextprotocol/server-everything`（stdio, npx）跑场景 1/2/4(部分)/6。
-> 文档中 MewCode/`~/.mewcode` 等命名按实际代码适配（Cortex/`~/.cortex`；项目级配置为 `<root>/.cortex/mcp.yaml`）。
+> 文档中 Cortex/`~/.cortex` 等命名按实际代码适配（Cortex/`~/.cortex`；项目级配置为 `<root>/.cortex/mcp.yaml`）。
 > 场景 2 的"default 弹人在回路"未复现——everything server 的 echo/get-sum/long-running 工具均自报 readOnlyHint=true，
 > 按 F12 正确走只读放行（Ask 路径由 AgentTest 权限集成用例与 McpManagerTest 覆盖）；
 > deny 规则 `mcp__demo__echo` E2E 验证命中（"项目规则判定"回灌、Loop 不中断）。
@@ -29,8 +29,8 @@
 
 ## 集成
 - [x] 权限链路自然命中：无规则时 `readOnlyHint=true` 的 MCP 工具走 Read 兜底（E2E 实测 echo/get-sum/long-running 直接放行）、其余走 Exec 兜底 Ask（单测覆盖）；deny 规则 `mcp__demo__echo` E2E 命中回灌。(AC11/F12/N4)
-- [x] permission 包零改动：`git diff src/main/java/com/mewcode/permission/` 在本次开发期间无任何修改(验证：本章结束时核对 diff 范围)。(N4)
-- [x] provider 适配层零改动：`src/main/java/com/mewcode/llm/AnthropicProvider.java`、`src/main/java/com/mewcode/llm/OpenAIProvider.java` 无修改(验证：核对 diff)。(AC12/N3)
+- [x] permission 包零改动：`git diff src/main/java/com/cortex/permission/` 在本次开发期间无任何修改(验证：本章结束时核对 diff 范围)。(N4)
+- [x] provider 适配层零改动：`src/main/java/com/cortex/llm/AnthropicProvider.java`、`src/main/java/com/cortex/llm/OpenAIProvider.java` 无修改(验证：核对 diff)。(AC12/N3)
 - [x] 黑名单 / 沙箱对 MCP 工具自动跳过：MCP 工具调用 `extractTarget` 返回 `("", false, false)` → 黑名单层因 `target.isEmpty()` 不命中、沙箱层因 `isFile==false` 不进入(验证：用 permission 的 `check` 对一次 mcp 全名调用断言不被黑名单/沙箱直接 Deny)。(AC11/F12)
 - [x] 既有能力不退化：`./gradlew test` 全过（AgentTest 权限用例随引擎注入适配，其余零适配）。(AC13/N5)
 
@@ -38,7 +38,7 @@
 - [x] `./gradlew shadowJar` 无错误(fat jar 可启动)。
 - [x] `./gradlew compileJava` (代码风格由 IDE 保证) 无差异(google-java-format)。(AC15/N8)
 - [x] `./gradlew test` 通过(config、conversation、tool、agent、prompt、permission、tui、**mcp** 三组单测)。
-- [x] `./gradlew test -Dtest='com.mewcode.mcp.*' -Dsurefire.rerunFailingTestsCount=3` 反复跑 3 轮无偶发失败(重点守护 `McpManager` 并发连接、共享状态、`close` 兜底)。(N7/N8)
+- [x] `./gradlew test -Dtest='com.cortex.mcp.*' -Dsurefire.rerunFailingTestsCount=3` 反复跑 3 轮无偶发失败(重点守护 `McpManager` 并发连接、共享状态、`close` 兜底)。(N7/N8)
 - [x] 凭据不落盘：配置示例 / 文档 / 测试 fixture 全用 `${VAR}`；`git grep -E '(Bearer|sk-|ghp_|github_pat_)[A-Za-z0-9_-]{16,}'` 在本次开发期间无命中。(AC14/N6)
 
 ## 端到端场景(tmux 实跑)
@@ -47,6 +47,6 @@
 - [x] 场景 3(失败隔离)：单测覆盖（不存在 command 的 server 被跳过、仅 stderr 告警）；McpManagerTest 验证失败隔离与 30s 超时跳过。(AC8)
 - [x] 场景 4(永久放行 + 重启)：Ask 路径的永久放行落盘与重启生效由阶段5 E2E（Write 工具）验证；MCP 工具因 everything server 全部自报只读未触发 Ask——规则引擎对 `mcp__*` 全名的命中已用 deny 规则 E2E 验证（`mcp__demo__echo` deny → 回灌"项目规则判定"）。(AC11)
 - [x] 场景 5(凭据展开)：配置 `env: { GITHUB_TOKEN: "${GITHUB_TOKEN}" }`；`unset GITHUB_TOKEN` 启动时 stderr 有 undefined 告警但 server 仍尝试启动(server 自决报错与否)；`export GITHUB_TOKEN=...` 后正常工作。(AC3/AC14)
-- [x] 场景 6(退出干净)：`q` 退出 mewcode 后 `ps -ef | grep server-everything`(或对应 server 进程名)确认子进程无残留。(AC10)
+- [x] 场景 6(退出干净)：`q` 退出 cortex 后 `ps -ef | grep server-everything`(或对应 server 进程名)确认子进程无残留。(AC10)
 - [x] 场景 7(bypass + 黑名单兜底)：Shift+Tab 切到 bypassPermissions,MCP 工具调用不弹窗；让模型跑内置 `Bash` 工具 `rm -rf /` 仍被黑名单拦下、回灌被拒。(AC11/N4)
 - [x] 场景 8(HTTP server,可选)：用 JDK `HttpServer.create(...)` 起一个最小 HTTP MCP server 或对接现有 server,配置 http 类型 + `headers: { Authorization: "Bearer ${TOKEN}" }`；启动后工具被注册；调用时 server 端日志可见 Authorization 头。(AC5)

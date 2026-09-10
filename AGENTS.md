@@ -97,5 +97,5 @@ Cortex — a Claude Code-style terminal AI coding assistant, written in Java. Ph
 - Streaming: each request runs on a virtual thread pushing `StreamEvent` into a `BlockingQueue`; thinking deltas are received and discarded (never rendered into text).
 
 ## Workflow (important)
-- **Spec-driven hard gate**: before coding any feature, follow `docs/spec/00-meta/mew-spec.md` — produce spec → plan → task → checklist under `docs/spec/`, each approved by the user. Do not write implementation code before all four are approved.
+- **Spec-driven hard gate**: before coding any feature, follow `docs/spec/00-meta/cortex-spec.md` — produce spec → plan → task → checklist under `docs/spec/`, each approved by the user. Do not write implementation code before all four are approved.
 - **E2E verification**: run real end-to-end checks in `tmux` (launch Cortex, send a real request, match against the phase's `Checklist.md`).

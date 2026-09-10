@@ -13,6 +13,6 @@
 
 记忆文件格式：
 
-- 项目指令文件：三层加载，项目根、项目根下 .mewcode/、用户目录 ~/.mewcode/ 各一份手写 Markdown，记技术栈、代码规范、注意事项，按优先级拼接
+- 项目指令文件：三层加载，项目根、项目根下 .cortex/、用户目录 ~/.cortex/ 各一份手写 Markdown，记技术栈、代码规范、注意事项，按优先级拼接
 - 会话存档：放在项目的 sessions 目录，每个会话一个 JSONL 文件；会话 ID 用 `YYYYMMDD-HHMMSS-xxxx` 防同秒撞车
 - 自动笔记：放在 memory 目录，每条笔记一个带 frontmatter 的 Markdown，另有一份索引文件

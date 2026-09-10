@@ -18,7 +18,7 @@ ch05 在三层叠加,**不改 ch04 的 Agent Loop 控制流**:
 ### prompt.Module(新增)
 
 ```java
-package com.mewcode.prompt;
+package com.cortex.prompt;
 
 public record Module(
         String name,    // 模块标识(身份、系统约束 …),仅用于可读性与测试断言
@@ -30,7 +30,7 @@ public record Module(
 ### prompt.Environment(新增)
 
 ```java
-package com.mewcode.prompt;
+package com.cortex.prompt;
 
 public record Environment(
         String workingDir, // System.getProperty("user.dir")
@@ -48,7 +48,7 @@ public record Environment(
 ### llm.System(新增)
 
 ```java
-package com.mewcode.llm;
+package com.cortex.llm;
 
 public record System(
         String stable,      // 可缓存:装配好的稳定系统提示(工具定义随 tools 一并进缓存前缀)
@@ -59,7 +59,7 @@ public record System(
 ### llm.Request(新增,替换 stream 位置参数)
 
 ```java
-package com.mewcode.llm;
+package com.cortex.llm;
 
 public record Request(
         java.util.List<Message> messages,   // 持久对话历史(不含本轮 reminder)
@@ -140,7 +140,7 @@ public interface Provider {
 **对外接口:** `stream(Request)`。
 **关键点:**
 
-- 删除 `effectiveSystem` 与对 `com.mewcode.prompt` 包的 import(系统提示改由 agent 传入)。
+- 删除 `effectiveSystem` 与对 `com.cortex.prompt` 包的 import(系统提示改由 agent 传入)。
 - **Anthropic**:用 `MessageCreateParams.builder().system(List<TextBlockParam>)` 传**两块** TextBlockParam:`req.system().stable()` 非空 → `TextBlockParam.builder().text(stable).cacheControl(CacheControlEphemeral.builder().build()).build()`(断点,默认 5m TTL);`req.system().environment()` 非空 → `TextBlockParam.builder().text(env).build()`(无 cacheControl)。请求顺序 tools→system→messages,断点打在稳定块 → **缓存前缀 = 全部工具 + 稳定块**;env 与历史在断点后不缓存,env 每轮变化不影响前缀命中。`Usage.cacheWrite = acc.usage().cacheCreationInputTokens()`、`cacheRead = acc.usage().cacheReadInputTokens()`。
   - reminder 织入:`req.reminder() != null && !req.reminder().isEmpty()` 时,把 `ContentBlockParam.ofText(TextBlockParam.builder().text(reminder).build())` **追加到最后一条消息的 content 块列表**(循环中最后一条恒为 user 或 tool_result→user,追加文本块仍是合法 user 消息,保 N3 角色交替);极端情形(末尾为 assistant)则新起一条 user 消息。
 - **OpenAI**:首条 system 消息 = `req.system().stable()`(若 `environment` 非空则拼为 `stable + "\n\n" + environment` 单条 system 消息——兼容端点对多条 system 消息支持不一,统一单条);stable 居前缀 → 端点前缀缓存命中稳定部分。`Usage.cacheRead = acc.usage().promptTokensDetails().cachedTokens()`、`cacheWrite = 0`。
@@ -159,7 +159,7 @@ public interface Provider {
 - 删除 `suffix`/`readOnlyDefinitions` 的「系统后缀」用法;**只读工具集仍按 mode 选择**(规划=`ToolRegistry.readOnlyDefinitions()`),`PLAN_MODE_REMINDER` 常量从系统后缀迁移为 `Reminder.plan(...)` 的内容。
 - 缓存用量透传:`new Event.Usage(input, output, cacheWrite, cacheRead)`。
 
-### smoke(`src/main/java/com/mewcode/smoke/SmokeMewCode.java`)
+### smoke(`src/main/java/com/cortex/smoke/SmokeCortex.java`)
 
 **职责:** 端到端验证缓存生效。
 **关键点:** 消费 `Event.usage` 时打印 `input/output/cache_write/cache_read`;跑两轮(或多轮)观察次轮 `cacheRead > 0`。`new Agent(p, ToolToolRegistry.createDefault(), "dev")`。
@@ -189,30 +189,30 @@ TUI/smoke ──run(conv,mode)──> agent
 ## 文件组织
 
 ```
-mewcode/
-├── src/main/java/com/mewcode/prompt/
+cortex/
+├── src/main/java/com/cortex/prompt/
 │   ├── Prompt.java         — 改:Module 引用/装配/buildSystemPrompt;保留 banner(CAT_BANNER/renderBanner/READY_HINT)
 │   ├── Module.java         — 新:Module record
 │   ├── Modules.java        — 新:fixedModules()/optionalModules() 七固定+三空槽的内容常量
 │   ├── Environment.java    — 新:Environment record / gather / render
 │   └── Reminder.java       — 新:systemReminder/plan(完整版/精简版常量)/EXECUTE_DIRECTIVE
-├── src/main/java/com/mewcode/llm/
+├── src/main/java/com/cortex/llm/
 │   ├── Provider.java       — 改:Provider 接口签名 stream(Request)
 │   ├── Request.java        — 新:Request record
 │   ├── System.java         — 新:System record(stable + environment)
 │   ├── Usage.java          — 改:加 cacheWrite/cacheRead
 │   ├── AnthropicProvider.java — 改:两块 system(断点 + env)、缓存用量解析、reminder 织入末条 user
 │   └── OpenAIProvider.java    — 改:单条 system(stable+env)、cachedTokens 解析、reminder 尾部注入
-├── src/main/java/com/mewcode/agent/
+├── src/main/java/com/cortex/agent/
 │   └── Agent.java          — 改:构造器加 version、run 采集环境/装配系统、按轮次 reminder、缓存透传
-├── src/main/java/com/mewcode/tool/
+├── src/main/java/com/cortex/tool/
 │   ├── EditFileTool.java   — 改:description() 补强化
 │   └── BashTool.java       — 改:description() 补强化
-├── src/main/java/com/mewcode/tui/
-│   └── AgentEvent 队列.java     — 改:new Agent(...) 传 version(MewCodeModel.version 已有)
-├── src/main/java/com/mewcode/smoke/
-│   └── SmokeMewCode.java      — 改:打印缓存用量;new Agent(p, registry, "dev")
-└── src/test/java/dev/mewcode/
+├── src/main/java/com/cortex/tui/
+│   └── AgentEvent 队列.java     — 改:new Agent(...) 传 version(CortexModel.version 已有)
+├── src/main/java/com/cortex/smoke/
+│   └── SmokeCortex.java      — 改:打印缓存用量;new Agent(p, registry, "dev")
+└── src/test/java/dev/cortex/
     ├── prompt/PromptTest.java   — 新:装配顺序/跳空槽/N1 确定性/双重强化文本 断言
     ├── prompt/EnvironmentTest.java — 新:非 git 目录降级、Render 含 cwd/platform/date
     ├── prompt/ReminderTest.java — 新:<system-reminder> 标签 + 完整/精简

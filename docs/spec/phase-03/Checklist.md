@@ -4,7 +4,7 @@
 >
 > 验证记录（2026-09-08，feature/phase03）：单测 `AgentTest`（场景 A–G，含并发分批与取消）全绿；
 > tmux 端到端用 `.cortex/config.yaml` 的 openai 兼容端点（deepseek）跑场景 1–4。
-> 文档中的 `com.mewcode` / `Provider` / `mvn` 等命名按实际代码（`com.cortex` / `LlmClient` / Gradle）适配。
+> 文档中的 `com.cortex` / `Provider` / `mvn` 等命名按实际代码（`com.cortex` / `LlmClient` / Gradle）适配。
 
 ## 实现完整性
 

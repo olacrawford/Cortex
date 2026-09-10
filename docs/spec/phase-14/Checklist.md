@@ -38,7 +38,7 @@
 - [x] 所有 Team 队员一律 `dontAsk=true`(覆盖角色 frontmatter 的 permissionMode),子进程没人能应答 ApprovalRequest 不会卡死(验证:用 `permissionMode: default` 的角色派队员让她调 bash,实跑断言任务正常完成,而不是卡在 Ask)
 - [x] Pane 后端 spawn 时 `initialPrompt` 通过预写入 mailbox(type=text, from=lead)送达,子进程不需要走 CLI 参数(验证:tmux 实跑,在 spawn 完检查 alice mailbox 已有一条 from=lead 的初始任务)
 - [x] Pane 后端子进程命令行含 `--agent-id <id>` 参数(验证:看 `TmuxBackend.buildMemberCmd` 单测;tmux 实跑后 `ps auxww | grep team-member` 看实际命令)
-- [x] Pane 后端的 `mewcode --team-member` 子进程**不启动 TUI**,跑 `TeamMemberRunner.run` 自治循环——读 mailbox → `runToCompletion` → 通知 Lead idle → stdin wake 等下一轮(验证:tmux 实跑看 alice pane 显示纯文本日志流而非 mewcode TUI 框)
+- [x] Pane 后端的 `cortex --team-member` 子进程**不启动 TUI**,跑 `TeamMemberRunner.run` 自治循环——读 mailbox → `runToCompletion` → 通知 Lead idle → stdin wake 等下一轮(验证:tmux 实跑看 alice pane 显示纯文本日志流而非 cortex TUI 框)
 - [x] Lead mailbox watcher 每秒轮询所有 Team 的 lead.json,把未读消息转 `<team-update>` reminder 推 pendingReminders + 给 `leadMailQueue` 发信号(验证:tmux 实跑后看 alice 发完 idle 通知 1 秒内 mailbox 的 unread 归零、read 累加)
 - [x] Lead 在 `SessionState.IDLE` 时收到 `LeadMailEvent`,TUI 调 `beginAutonomousTurn` 合成 user 消息自动开新轮(验证:tmux 实跑——派完队员等他完成,Lead 不需要用户输入就自动出现 `[team-update]...` 行 + Synthesis 回复)
 - [x] `/team list` 输出含 `~/.cortex/teams/` 下所有 Team(验证:TUI 实跑)
@@ -62,20 +62,20 @@
 - macOS / Linux
 - tmux 已安装
 - JDK 21 安装
-- 当前不在 mewcode 进程内,准备开新 tmux 会话
+- 当前不在 cortex 进程内,准备开新 tmux 会话
 
 步骤:
 - [x] `tmux new-session -s ch15-test` 进入新 tmux 会话
-- [x] `cd /path/to/mewcode && ./gradlew shadowJar`(预编译,加快冷启动)
-- [x] `java -jar build/libs/mewcode.jar` 启动 TUI;启动消息显示一切正常,无 ch15 相关 error
+- [x] `cd /path/to/cortex && ./gradlew shadowJar`(预编译,加快冷启动)
+- [x] `java -jar build/libs/cortex.jar` 启动 TUI;启动消息显示一切正常,无 ch15 相关 error
 - [x] 在 TUI 输入:「创建一个名为 demo 的团队」
   - 预期:Agent 调 `TeamCreate(teamName="demo")`;返回 `{"teamName":"demo","backend":"tmux","configPath":"..."}`
   - 验证:`ls ~/.cortex/teams/demo/config.json` 存在;`cat config.json` 中 `backend` 字段为 `tmux`
 - [x] 在 TUI 输入:「派 alice 用 general-purpose 角色,在 worktree 里跑 `echo hello > /tmp/test_alice.txt && pwd > /tmp/test_alice_pwd.txt`」
   - 预期:Agent 调 `Agent(teamName="demo", subagentType="general-purpose", name="alice", prompt="...")`
   - 验证 a:tmux 自动 split 出右侧 pane(`tmux list-panes -F "#{pane_id} #{pane_current_command}"` 看到新 pane)
-  - 验证 b:新 pane 内**显示自治循环日志流**(`[team-member] alice · team=demo · agent=... · cwd=...` 起始行 + Agent 工具调用打印,**不是** mewcode TUI 框)
-  - 验证 c:`ls /path/to/mewcode/.mewcode/worktrees/team-demo+alice/` 目录存在
+  - 验证 b:新 pane 内**显示自治循环日志流**(`[team-member] alice · team=demo · agent=... · cwd=...` 起始行 + Agent 工具调用打印,**不是** cortex TUI 框)
+  - 验证 c:`ls /path/to/cortex/.cortex/worktrees/team-demo+alice/` 目录存在
   - 验证 d:等待 30 秒,`cat /tmp/test_alice.txt` 内容为 `hello`
   - 验证 e:`cat /tmp/test_alice_pwd.txt` 内容为 worktree 路径(`.../team-demo+alice`)
   - 验证 f:`cat ~/.cortex/teams/demo/config.json` 中 `members` 数组含 alice,`backendType="tmux"`,`paneId` 非空
@@ -92,7 +92,7 @@
   - 验证 c:Lead 屏幕**不需要用户输入**自动出现 `● [team-update] 队员发来新消息...` 文本块 + 紧接的 Synthesis 回复(自动唤醒)
 - [x] 在 TUI 输入 `/team delete demo --force`
   - 验证 a:`ls ~/.cortex/teams/` 无 `demo` 目录
-  - 验证 b:`ls /path/to/mewcode/.mewcode/worktrees/` 无 `team-demo+alice`
+  - 验证 b:`ls /path/to/cortex/.cortex/worktrees/` 无 `team-demo+alice`
   - 验证 c:`tmux list-panes` 只剩 Lead pane,alice 的 `%1` 被 `backend.kill` 干掉了
 
 **场景 2:in-process 后端实跑**
@@ -102,7 +102,7 @@
 - 在非 tmux 终端窗口内
 
 步骤:
-- [x] 启动 `java -jar build/libs/mewcode.jar`(同会话已 unset 上述变量)
+- [x] 启动 `java -jar build/libs/cortex.jar`(同会话已 unset 上述变量)
 - [x] 在 TUI 输入:「创建 inproc 团队」
   - 验证:`cat ~/.cortex/teams/inproc/config.json` 中 `backend` 为 `in-process`
 - [x] 在 TUI 输入:「派 bob 用 general-purpose,在 worktree 里 `echo step1 > /tmp/bob.txt`」
@@ -117,11 +117,11 @@
 **场景 3:Coordinator Mode 实跑**
 
 环境准备:
-- `.mewcode/config.yaml` 加 `features:\n  coordinator_mode: true`(snake_case,不是 camelCase)
+- `.cortex/config.yaml` 加 `features:\n  coordinator_mode: true`(snake_case,不是 camelCase)
 - 设环境变量 `MEWCODE_COORDINATOR_MODE=1`
 
 步骤:
-- [x] `MEWCODE_COORDINATOR_MODE=1 java -jar build/libs/mewcode.jar`
+- [x] `MEWCODE_COORDINATOR_MODE=1 java -jar build/libs/cortex.jar`
 - [x] 观察 TUI 状态栏出现 `[COORDINATOR]` 标签
 - [x] 在 TUI 输入:「写一个 hello world 到 /tmp/coord_test.txt」
   - 预期:`WriteFile` **不在 Lead 工具集**(被 `setAllowedTools` 剥夺),LLM 应该说「我没有 write_file 工具」并尝试用 bash 转写
@@ -129,7 +129,7 @@
 - [x] 在 TUI 输入:「跑 `git status`」
   - 预期:Agent 调 `Bash`,工具正常执行(bash 在 Coordinator 白名单中)
   - 验证:输出含 git 状态信息
-- [x] 在 TUI 输入:「派几个队员探索 mewcode 的 dev/com.cortex/agent 和 dev/com.cortex/team」
+- [x] 在 TUI 输入:「派几个队员探索 cortex 的 dev/com.cortex/agent 和 dev/com.cortex/team」
   - 预期:Lead 调 Agent + SendMessage 派出队员后,**不**立刻调 read_file/glob/bash 自己探索(被 Coordinator system prompt 中的纪律段约束)
   - 验证:Lead 派完队员的回复应该是「等待汇报中」类似措辞;在队员发完 idle 消息前 Lead 屏幕没新工具调用
 
@@ -138,8 +138,8 @@
 环境准备:无特殊
 
 步骤:
-- [x] 准备一个角色定义 `~/.mewcode/agents/planner.md`,frontmatter 含 `permissionMode: plan`,body 简述「先制定计划」
-- [x] 启动 mewcode,创建 team `plan-test`
+- [x] 准备一个角色定义 `~/.cortex/agents/planner.md`,frontmatter 含 `permissionMode: plan`,body 简述「先制定计划」
+- [x] 启动 cortex,创建 team `plan-test`
 - [x] 在 TUI 输入:「派 planner 用 planner 角色,在 worktree 制定 hello world 程序的实现计划」
   - 预期:planner 队员以 plan 模式起步,生成计划后通过 SendMessage 发给 Lead
   - 验证:Lead mailbox 含计划消息
@@ -149,7 +149,7 @@
 
 ## 失败回归
 
-- [x] mewcode 启动时 `~/.cortex/teams/` 不存在,自动创建,不报错
+- [x] cortex 启动时 `~/.cortex/teams/` 不存在,自动创建,不报错
 - [x] `~/.cortex/teams/<somename>/config.json` 内容损坏时,启动只 stderr 警告,跳过该 Team
 - [x] 创建 Team 时若 disk 写失败(可手动 chmod 模拟),抛 IOException,不留半成品目录
 - [x] mailbox 文件锁抢占冲突 10 次仍失败时,SendMessage 抛 IOException,不丢消息

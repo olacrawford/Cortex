@@ -4,50 +4,50 @@
 
 | 操作 | 文件 | 职责 |
 |------|------|------|
-| 新建 | `src/main/java/com/mewcode/permission/Matcher.java` | sealed Matcher 接口 |
-| 新建 | `src/main/java/com/mewcode/permission/ExactMatcher.java` | record 实现 |
-| 新建 | `src/main/java/com/mewcode/permission/GlobMatcher.java` | record 实现 |
-| 新建 | `src/main/java/com/mewcode/permission/RegexMatcher.java` | record 实现 |
-| 新建 | `src/main/java/com/mewcode/permission/NotMatcher.java` | record 实现 |
-| 新建 | `src/main/java/com/mewcode/permission/Matchers.java` | `compile` 工厂 + `MatcherCompileException` |
-| 新建 | `src/test/java/dev/mewcode/permission/MatchersTest.java` | 四种 type × 边界条件覆盖 |
-| 修改 | `src/main/java/com/mewcode/permission/PermissionRule.java` | `parse` 识别前缀、record 持有 Matcher 替代 String pattern、`match` 改造 |
-| 修改 | `src/test/java/dev/mewcode/permission/PermissionRuleTest.java` | 扩展用例覆盖新语法 |
-| 修改 | `src/main/java/com/mewcode/permission/SettingsLoader.java` | `toRuleSet` 改造：失败 rule 走 stderr |
-| 修改 | `src/test/java/dev/mewcode/permission/SettingsLoaderTest.java` | 验证 stderr 报错与跳过逻辑 |
-| 新建 | `src/main/java/com/mewcode/hook/package-info.java` | 包注释 |
-| 新建 | `src/main/java/com/mewcode/hook/Event.java` | 11 个枚举 + `isBlocking` + `parse` |
-| 新建 | `src/main/java/com/mewcode/hook/CombineMode.java` | enum |
-| 新建 | `src/main/java/com/mewcode/hook/AtomCondition.java` | record |
-| 新建 | `src/main/java/com/mewcode/hook/Condition.java` | record |
-| 新建 | `src/main/java/com/mewcode/hook/Action.java` | sealed Action + 4 个嵌套 record |
-| 新建 | `src/main/java/com/mewcode/hook/HookRule.java` | record |
-| 新建 | `src/main/java/com/mewcode/hook/Payload.java` | 字典序 JSON + `getByPath` |
-| 新建 | `src/main/java/com/mewcode/hook/ConditionEvaluator.java` | `evaluate` / `getByPath` |
-| 新建 | `src/main/java/com/mewcode/hook/HookLoader.java` | YAML 解析、双层合并、字段校验 |
-| 新建 | `src/test/java/dev/mewcode/hook/HookLoaderTest.java` | 字段校验、加载错误、合并测试 |
-| 新建 | `src/main/java/com/mewcode/hook/HookEngine.java` | HookEngine + dispatch 主流程 + only_once |
-| 新建 | `src/main/java/com/mewcode/hook/DispatchResult.java` | record |
-| 新建 | `src/test/java/dev/mewcode/hook/HookEngineTest.java` | 各事件 dispatch、拦截、reminder、once 覆盖 |
-| 新建 | `src/main/java/com/mewcode/hook/HookExecutor.java` | 四类 action 执行器 |
-| 新建 | `src/main/java/com/mewcode/hook/ExecutionResult.java` | record |
-| 新建 | `src/test/java/dev/mewcode/hook/HookExecutorTest.java` | shell exit2、http block、prompt、subagent stub |
-| 修改 | `src/main/java/com/mewcode/agent/SessionRuntime.java` | 加 `pendingReminders` + `hookEngine` 字段 + `resetForNewSession` 清空 |
-| 修改 | `src/test/java/dev/mewcode/agent/SessionRuntimeTest.java` | 验证 `pendingReminders` 行为 |
-| 修改 | `src/main/java/com/mewcode/agent/Agent.java` | `Builder.hookEngine`、11 个 emit 点（部分由 tui 触发，agent 负责 PreUserMessage/PreToolUse/PostToolUse/PreCompact/PostCompact/Stop/Notification） |
-| 修改 | `src/test/java/dev/mewcode/agent/AgentTest.java` | 拦截路径测试 |
-| 新建 | `src/main/java/com/mewcode/tui/HooksCommand.java` | `/hooks` 命令 handler、MewCodeModel 的 hook 查询方法 |
-| 修改 | `src/main/java/com/mewcode/tui/MewCodeModel.java` | `Params/Builder` 加 hookEngine、持有；`init` 触发 SessionStart |
-| 修改 | `src/main/java/com/mewcode/tui/AgentEvent 队列.java` | `submit()` 内 UserPromptSubmit dispatch + 拦截集成 |
-| 修改 | `src/main/java/com/mewcode/tui/Commands.java` | `/clear`、`/resume` 触发 SessionEnd + SessionStart/Resume |
-| 修改 | `src/main/java/com/mewcode/command/BuiltinCommands.java` | 加 `/hooks` 内置命令 |
-| 修改 | `src/main/java/com/mewcode/command/CommandUi.java` | UI 接口加 hook 查询方法 |
-| 修改 | `src/main/java/com/mewcode/MewCode.java` | 加 `HookLoader.load(root)` 与 wiring；SessionEnd 兜底 |
+| 新建 | `src/main/java/com/cortex/permission/Matcher.java` | sealed Matcher 接口 |
+| 新建 | `src/main/java/com/cortex/permission/ExactMatcher.java` | record 实现 |
+| 新建 | `src/main/java/com/cortex/permission/GlobMatcher.java` | record 实现 |
+| 新建 | `src/main/java/com/cortex/permission/RegexMatcher.java` | record 实现 |
+| 新建 | `src/main/java/com/cortex/permission/NotMatcher.java` | record 实现 |
+| 新建 | `src/main/java/com/cortex/permission/Matchers.java` | `compile` 工厂 + `MatcherCompileException` |
+| 新建 | `src/test/java/dev/cortex/permission/MatchersTest.java` | 四种 type × 边界条件覆盖 |
+| 修改 | `src/main/java/com/cortex/permission/PermissionRule.java` | `parse` 识别前缀、record 持有 Matcher 替代 String pattern、`match` 改造 |
+| 修改 | `src/test/java/dev/cortex/permission/PermissionRuleTest.java` | 扩展用例覆盖新语法 |
+| 修改 | `src/main/java/com/cortex/permission/SettingsLoader.java` | `toRuleSet` 改造：失败 rule 走 stderr |
+| 修改 | `src/test/java/dev/cortex/permission/SettingsLoaderTest.java` | 验证 stderr 报错与跳过逻辑 |
+| 新建 | `src/main/java/com/cortex/hook/package-info.java` | 包注释 |
+| 新建 | `src/main/java/com/cortex/hook/Event.java` | 11 个枚举 + `isBlocking` + `parse` |
+| 新建 | `src/main/java/com/cortex/hook/CombineMode.java` | enum |
+| 新建 | `src/main/java/com/cortex/hook/AtomCondition.java` | record |
+| 新建 | `src/main/java/com/cortex/hook/Condition.java` | record |
+| 新建 | `src/main/java/com/cortex/hook/Action.java` | sealed Action + 4 个嵌套 record |
+| 新建 | `src/main/java/com/cortex/hook/HookRule.java` | record |
+| 新建 | `src/main/java/com/cortex/hook/Payload.java` | 字典序 JSON + `getByPath` |
+| 新建 | `src/main/java/com/cortex/hook/ConditionEvaluator.java` | `evaluate` / `getByPath` |
+| 新建 | `src/main/java/com/cortex/hook/HookLoader.java` | YAML 解析、双层合并、字段校验 |
+| 新建 | `src/test/java/dev/cortex/hook/HookLoaderTest.java` | 字段校验、加载错误、合并测试 |
+| 新建 | `src/main/java/com/cortex/hook/HookEngine.java` | HookEngine + dispatch 主流程 + only_once |
+| 新建 | `src/main/java/com/cortex/hook/DispatchResult.java` | record |
+| 新建 | `src/test/java/dev/cortex/hook/HookEngineTest.java` | 各事件 dispatch、拦截、reminder、once 覆盖 |
+| 新建 | `src/main/java/com/cortex/hook/HookExecutor.java` | 四类 action 执行器 |
+| 新建 | `src/main/java/com/cortex/hook/ExecutionResult.java` | record |
+| 新建 | `src/test/java/dev/cortex/hook/HookExecutorTest.java` | shell exit2、http block、prompt、subagent stub |
+| 修改 | `src/main/java/com/cortex/agent/SessionRuntime.java` | 加 `pendingReminders` + `hookEngine` 字段 + `resetForNewSession` 清空 |
+| 修改 | `src/test/java/dev/cortex/agent/SessionRuntimeTest.java` | 验证 `pendingReminders` 行为 |
+| 修改 | `src/main/java/com/cortex/agent/Agent.java` | `Builder.hookEngine`、11 个 emit 点（部分由 tui 触发，agent 负责 PreUserMessage/PreToolUse/PostToolUse/PreCompact/PostCompact/Stop/Notification） |
+| 修改 | `src/test/java/dev/cortex/agent/AgentTest.java` | 拦截路径测试 |
+| 新建 | `src/main/java/com/cortex/tui/HooksCommand.java` | `/hooks` 命令 handler、CortexModel 的 hook 查询方法 |
+| 修改 | `src/main/java/com/cortex/tui/CortexModel.java` | `Params/Builder` 加 hookEngine、持有；`init` 触发 SessionStart |
+| 修改 | `src/main/java/com/cortex/tui/AgentEvent 队列.java` | `submit()` 内 UserPromptSubmit dispatch + 拦截集成 |
+| 修改 | `src/main/java/com/cortex/tui/Commands.java` | `/clear`、`/resume` 触发 SessionEnd + SessionStart/Resume |
+| 修改 | `src/main/java/com/cortex/command/BuiltinCommands.java` | 加 `/hooks` 内置命令 |
+| 修改 | `src/main/java/com/cortex/command/CommandUi.java` | UI 接口加 hook 查询方法 |
+| 修改 | `src/main/java/com/cortex/Cortex.java` | 加 `HookLoader.load(root)` 与 wiring；SessionEnd 兜底 |
 | 修改 | `build.gradle.kts` | 如尚未引入 snakeyaml 与 jackson-databind，需补齐（多半已有） |
 
 ## T1: 实现 permission.Matcher 接口与四种类型
 
-**文件：** `src/main/java/com/mewcode/permission/Matcher.java`、`ExactMatcher.java`、`GlobMatcher.java`、`RegexMatcher.java`、`NotMatcher.java`、`Matchers.java`
+**文件：** `src/main/java/com/cortex/permission/Matcher.java`、`ExactMatcher.java`、`GlobMatcher.java`、`RegexMatcher.java`、`NotMatcher.java`、`Matchers.java`
 **依赖：** 无
 **步骤：**
 1. 新建 `Matcher.java`，声明 `public sealed interface Matcher permits ExactMatcher, GlobMatcher, RegexMatcher, NotMatcher { boolean match(String s); String describe(); }`
@@ -69,7 +69,7 @@
 
 ## T2: matcher 单元测试
 
-**文件：** `src/test/java/dev/mewcode/permission/MatchersTest.java`
+**文件：** `src/test/java/dev/cortex/permission/MatchersTest.java`
 **依赖：** T1
 **步骤：**
 1. JUnit 5；`@ParameterizedTest` + `@MethodSource` 覆盖 4 种类型各自的命中/不命中用例
@@ -86,7 +86,7 @@
 
 ## T3: 升级 permission.PermissionRule 与 parse
 
-**文件：** `src/main/java/com/mewcode/permission/PermissionRule.java`
+**文件：** `src/main/java/com/cortex/permission/PermissionRule.java`
 **依赖：** T1
 **步骤：**
 1. `PermissionRule` 改为 record：`record PermissionRule(String tool, Matcher matcher, boolean allow, String raw)`
@@ -101,7 +101,7 @@
 
 ## T4: 升级 SettingsLoader 错误日志
 
-**文件：** `src/main/java/com/mewcode/permission/SettingsLoader.java`
+**文件：** `src/main/java/com/cortex/permission/SettingsLoader.java`
 **依赖：** T3
 **步骤：**
 1. `toRuleSet` 改造：`PermissionRule.parse` 抛 `RuleParseException` 时调
@@ -113,7 +113,7 @@
 
 ## T5: 扩展 PermissionRuleTest 与 SettingsLoaderTest
 
-**文件：** `src/test/java/dev/mewcode/permission/PermissionRuleTest.java`、`SettingsLoaderTest.java`
+**文件：** `src/test/java/dev/cortex/permission/PermissionRuleTest.java`、`SettingsLoaderTest.java`
 **依赖：** T3、T4
 **步骤：**
 1. PermissionRuleTest：补充用例
@@ -128,7 +128,7 @@
 
 ## T6: hook 包基础数据结构
 
-**文件：** `src/main/java/com/mewcode/hook/package-info.java`、`Event.java`、`CombineMode.java`、`AtomCondition.java`、`Condition.java`、`Action.java`、`HookRule.java`、`Payload.java`
+**文件：** `src/main/java/com/cortex/hook/package-info.java`、`Event.java`、`CombineMode.java`、`AtomCondition.java`、`Condition.java`、`Action.java`、`HookRule.java`、`Payload.java`
 **依赖：** 无
 **步骤：**
 1. `package-info.java`：包级 Javadoc，描述本包职责
@@ -148,7 +148,7 @@
 
 ## T7: hook.ConditionEvaluator 字段路径求值
 
-**文件：** `src/main/java/com/mewcode/hook/ConditionEvaluator.java`
+**文件：** `src/main/java/com/cortex/hook/ConditionEvaluator.java`
 **依赖：** T6、T1
 **步骤：**
 1. `static String getByPath(Payload p, String path)`：按 `.` 分隔；递归从 Map 取值；中途遇 null/非 Map 返回空串
@@ -162,12 +162,12 @@
 
 ## T8: hook.HookLoader YAML 解析
 
-**文件：** `src/main/java/com/mewcode/hook/HookLoader.java`
+**文件：** `src/main/java/com/cortex/hook/HookLoader.java`
 **依赖：** T6、T7、T1
 **步骤：**
 1. 定义 YAML 中间结构：直接用 SnakeYAML Engine 解析成 `Map<String, Object>`，再手动绑定到 `HookRule`
 2. `static HookEngine load(Path projectRoot)` 主入口：
-   - 计算两个候选路径：`projectRoot.resolve(".mewcode/hooks.yaml")`、`Path.of(System.getProperty("user.home"), ".mewcode/hooks.yaml")`
+   - 计算两个候选路径：`projectRoot.resolve(".cortex/hooks.yaml")`、`Path.of(System.getProperty("user.home"), ".cortex/hooks.yaml")`
    - 文件不存在跳过；存在但解析失败 stderr 输出后跳过
    - 对每个 hook 对象调 `compileRule(source, idx, rawMap)`，返回 `HookRule` 或抛 `HookCompileException`
    - 累积成功的 rule、stderr 输出失败的 rule
@@ -188,7 +188,7 @@
 
 ## T9: hook.HookLoader 测试
 
-**文件：** `src/test/java/dev/mewcode/hook/HookLoaderTest.java`
+**文件：** `src/test/java/dev/cortex/hook/HookLoaderTest.java`
 **依赖：** T8
 **步骤：**
 1. 用 `@TempDir` 场景：写一份合法 hooks.yaml（含 2 条 hook），`HookLoader.load` 返回的 HookEngine 含 2 条 rule
@@ -203,7 +203,7 @@
 
 ## T10: hook.HookEngine 与 dispatch 主流程
 
-**文件：** `src/main/java/com/mewcode/hook/HookEngine.java`、`DispatchResult.java`
+**文件：** `src/main/java/com/cortex/hook/HookEngine.java`、`DispatchResult.java`
 **依赖：** T6、T7
 **步骤：**
 1. `DispatchResult` record：`(boolean blocked, String reason, String blockingHookName, List<String> injectedPrompts)`；静态 `empty()`
@@ -228,7 +228,7 @@
 
 ## T11: hook.HookExecutor 四类动作执行
 
-**文件：** `src/main/java/com/mewcode/hook/HookExecutor.java`、`ExecutionResult.java`
+**文件：** `src/main/java/com/cortex/hook/HookExecutor.java`、`ExecutionResult.java`
 **依赖：** T6
 **步骤：**
 1. `ExecutionResult` record：`(boolean blocked, String reason, String prompt, Throwable error)`；静态 `empty()`
@@ -256,7 +256,7 @@
 
 ## T12: executor 单元测试
 
-**文件：** `src/test/java/dev/mewcode/hook/HookExecutorTest.java`
+**文件：** `src/test/java/dev/cortex/hook/HookExecutorTest.java`
 **依赖：** T11
 **步骤：**
 1. shell exit 2 with stderr → `blocked=true` + reason 含 stderr
@@ -274,7 +274,7 @@
 
 ## T13: hook.HookEngine 测试
 
-**文件：** `src/test/java/dev/mewcode/hook/HookEngineTest.java`
+**文件：** `src/test/java/dev/cortex/hook/HookEngineTest.java`
 **依赖：** T10、T11
 **步骤：**
 1. 多 rule 同事件按声明序执行
@@ -289,7 +289,7 @@
 
 ## T14: agent SessionRuntime 扩展
 
-**文件：** `src/main/java/com/mewcode/agent/SessionRuntime.java`、`src/test/java/dev/mewcode/agent/SessionRuntimeTest.java`
+**文件：** `src/main/java/com/cortex/agent/SessionRuntime.java`、`src/test/java/dev/cortex/agent/SessionRuntimeTest.java`
 **依赖：** T6、T10
 **步骤：**
 1. `SessionRuntime` 加字段：`final List<String> pendingReminders`（用 `Collections.synchronizedList(new ArrayList<>())` 或加锁包装）、`HookEngine hookEngine`
@@ -303,7 +303,7 @@
 
 ## T15: agent.Builder.hookEngine 与 emit 框架
 
-**文件：** `src/main/java/com/mewcode/agent/Agent.java`、`Agent.Builder` 内嵌类
+**文件：** `src/main/java/com/cortex/agent/Agent.java`、`Agent.Builder` 内嵌类
 **依赖：** T14
 **步骤：**
 1. `Agent.Builder` 加方法 `Builder hookEngine(HookEngine e)`，赋值到 `Builder.hookEngine`
@@ -320,7 +320,7 @@
 
 ## T16: agent 各事件 emit 接入
 
-**文件：** `src/main/java/com/mewcode/agent/Agent.java`
+**文件：** `src/main/java/com/cortex/agent/Agent.java`
 **依赖：** T15
 **步骤：**
 1. `run` 开始处准备 Stop emit 入口——实际 Stop 在 `Done` 事件 publish 前调用
@@ -340,7 +340,7 @@
 
 ## T17: AgentTest 拦截路径与 emit 覆盖
 
-**文件：** `src/test/java/dev/mewcode/agent/AgentTest.java`、`SessionRuntimeTest.java`
+**文件：** `src/test/java/dev/cortex/agent/AgentTest.java`、`SessionRuntimeTest.java`
 **依赖：** T16
 **步骤：**
 1. 构造一个 fake `Provider` + 注入真实 `HookEngine`（合成 rules 注入）
@@ -351,13 +351,13 @@
 
 **验证：** `./gradlew test -Dtest=AgentTest -Dtest.method=*Hook*` 通过
 
-## T18: tui MewCodeModel 持有 HookEngine
+## T18: tui CortexModel 持有 HookEngine
 
-**文件：** `src/main/java/com/mewcode/tui/MewCodeModel.java`
+**文件：** `src/main/java/com/cortex/tui/CortexModel.java`
 **依赖：** T15
 **步骤：**
-1. `MewCodeModel.Params` 加 `HookEngine hookEngine`
-2. `MewCodeModel` 加字段 `HookEngine hookEngine`
+1. `CortexModel.Params` 加 `HookEngine hookEngine`
+2. `CortexModel` 加字段 `HookEngine hookEngine`
 3. 构造器内：
    - 把 `params.hookEngine` 赋给 `this.hookEngine` 与 `runtime.hookEngine`
    - 构造 agent 时加 `.hookEngine(params.hookEngine)`
@@ -367,7 +367,7 @@
 
 ## T19: tui UserPromptSubmit 拦截集成
 
-**文件：** `src/main/java/com/mewcode/tui/AgentEvent 队列.java` 或 `MewCodeModel` 的 submit 方法所在文件
+**文件：** `src/main/java/com/cortex/tui/AgentEvent 队列.java` 或 `CortexModel` 的 submit 方法所在文件
 **依赖：** T18
 **步骤：**
 1. `submit()` 重写：
@@ -384,7 +384,7 @@
 
 ## T20: tui SessionStart / End / Resume
 
-**文件：** `src/main/java/com/mewcode/tui/MewCodeModel.java`、`Commands.java`、`AgentEvent 队列.java`
+**文件：** `src/main/java/com/cortex/tui/CortexModel.java`、`Commands.java`、`AgentEvent 队列.java`
 **依赖：** T18、T19
 **步骤：**
 1. 新增 `void dispatchSessionStart()`：构造 payload + 调 `HookEngine.dispatch` + `injectedPrompts` 写入 runtime
@@ -394,17 +394,17 @@
 5. `/clear` handler 内：先 `dispatchSessionEnd`，再 `runtime.resetForNewSession`，最后 `dispatchSessionStart`
 6. `/resume` handler 选中会话恢复完毕后：先 `dispatchSessionEnd`（旧），切到新会话后 `dispatchSessionResume`
 7. `handleExit` 内：`dispatchSessionEnd` 后再退出
-8. `MewCode` 中 `app.run()` 返回后由 main 调一次 `hookEngine.dispatch(Event.SESSION_END, ...)` 兜底（ctrl+c 一退出也 emit）；tui 内的 `/clear`、`/resume` 自己控制
+8. `Cortex` 中 `app.run()` 返回后由 main 调一次 `hookEngine.dispatch(Event.SESSION_END, ...)` 兜底（ctrl+c 一退出也 emit）；tui 内的 `/clear`、`/resume` 自己控制
 
 **验证：** `./gradlew -q -DskipTests compile` 编译通过
 
 ## T21: /hooks 命令
 
-**文件：** `src/main/java/com/mewcode/tui/HooksCommand.java`、`command/BuiltinCommands.java`、`command/CommandUi.java`
+**文件：** `src/main/java/com/cortex/tui/HooksCommand.java`、`command/BuiltinCommands.java`、`command/CommandUi.java`
 **依赖：** T6、T10、T18
 **步骤：**
 1. `CommandUi` 接口加方法 `List<String> hookSources()`、`List<HookRule> hookRules()`
-2. `MewCodeModel` 实现这两个方法（读 `this.hookEngine` 字段）
+2. `CortexModel` 实现这两个方法（读 `this.hookEngine` 字段）
 3. 新增 `HooksCommand`，实现 `Command` 接口或注册成 lambda：
    - 取 rules 与 sources
    - 空时 `view.append("No hooks loaded.")`
@@ -416,11 +416,11 @@
 
 ## T22: Main wiring
 
-**文件：** `src/main/java/com/mewcode/MewCode.java`
+**文件：** `src/main/java/com/cortex/Cortex.java`
 **依赖：** T8、T18
 **步骤：**
 1. 在 `PermissionEngine.create(root)` 之后调 `HookEngine hookEngine = HookLoader.load(root)`
-2. `MewCodeModel.Params` 设置 `.hookEngine(hookEngine)`
+2. `CortexModel.Params` 设置 `.hookEngine(hookEngine)`
 3. `app.run()` 返回后调
    ```java
    if (hookEngine != null) {
@@ -428,9 +428,9 @@
    }
    ```
    兜底 SessionEnd
-4. import 加 `com.mewcode.hook.*`
+4. import 加 `com.cortex.hook.*`
 
-**验证：** `./gradlew shadowJar` 编译通过、`java -jar build/libs/mewcode.jar` 能启动
+**验证：** `./gradlew shadowJar` 编译通过、`java -jar build/libs/cortex.jar` 能启动
 
 ## T23: 整体编译与测试
 
@@ -456,11 +456,11 @@
 
 ## T25: tmux 端到端实跑（验收 AC17 与 checklist 端到端场景）
 
-**文件：** `.mewcode/hooks.yaml` 临时测试配置
+**文件：** `.cortex/hooks.yaml` 临时测试配置
 **依赖：** T23、T24
 **步骤：**
 1. 写测试 hooks.yaml：包含 AC4-AC15 各典型场景的 hook
-2. tmux 新建 session 启动 mewcode（`java -jar build/libs/mewcode.jar` 或 `./gradlew -q exec:java`）
+2. tmux 新建 session 启动 cortex（`java -jar build/libs/cortex.jar` 或 `./gradlew -q exec:java`）
 3. 依次触发：write_file 工具调用、含 delete 关键字的用户输入、git 命令、Stop 事件
 4. 观察 stderr 日志、tool_result 内容、reminder 注入是否符合预期
 5. 全程无异常堆栈、不卡顿

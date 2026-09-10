@@ -1,5 +1,5 @@
 ---
-name: mew-spec
+name: cortex-spec
 description: "Spec 驱动开发：通过协作式需求澄清，依次生成 spec.md → plan.md → task.md → checklist.md，然后指导开发和验收。在开始任何功能、模块或章节开发前使用。"
 ---
 

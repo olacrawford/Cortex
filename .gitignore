@@ -15,3 +15,6 @@ bin/
 # ch13: Worktree 隔离副本（仅供 SubAgent 与手动管理使用）
 .cortex/worktrees/
 .cortex/worktree_session.json
+
+# 个人面试准备文档，不入库
+面试题.md

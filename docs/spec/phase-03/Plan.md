@@ -6,12 +6,12 @@
 
 ch04 不新增包，在 ch03「tool / agent / llm / conversation / prompt / tui」之上**扩展**：
 
-- **com.mewcode.agent（重写 `Agent.run`）**：把 ch03 的「请求#1 → 执行 → 请求#2 → 停」改为真正的 ReAct 循环——`for` 迭代直到自然完成 / 上限 / 取消 / 连续未知工具 / 出错。新增保序分批并发执行、迭代进度与用量事件、终止时的历史一致性收尾、Plan/Normal 两种模式。
-- **com.mewcode.llm（扩展）**：`StreamEvent` 新增 `Usage` 子类型；`Provider.stream` 增 `String systemSuffix` 形参（Plan Mode 系统提示后缀）；两适配器在流结束后上抛本轮 token 用量、把 `systemSuffix` 拼到内置系统提示后；OpenAI 打开 `ChatCompletionStreamOptions.includeUsage`。
-- **com.mewcode.tool（扩展）**：`Tool` 接口增 `boolean readOnly()`；6 个工具各实现；`ToolRegistry` 增 `readOnlyDefinitions()` 与 `isReadOnly(name)`。
-- **com.mewcode.conversation（扩展）**：增 `Optional<Role> lastRole()`（终止收尾判断角色尾巴）。
-- **com.mewcode.prompt（扩展）**：增 `PLAN_MODE_REMINDER`（计划态系统后缀）与 `EXECUTE_DIRECTIVE`（`/do` 触发执行的用户消息）；`SYSTEM_PROMPT` 增补「持续工作直到任务完成」的 Agent 循环约定。
-- **com.mewcode.tui（扩展）**：`submit` 识别 `/plan`、`/do`；引入 per-turn 取消标志位与 cancel 钩子；事件订阅器处理用量 / 进度 / 通知 / 多个并发工具；按键处理拆分 Esc / Ctrl+C；状态栏显示模式与累计用量、动态区显示迭代轮次。
+- **com.cortex.agent（重写 `Agent.run`）**：把 ch03 的「请求#1 → 执行 → 请求#2 → 停」改为真正的 ReAct 循环——`for` 迭代直到自然完成 / 上限 / 取消 / 连续未知工具 / 出错。新增保序分批并发执行、迭代进度与用量事件、终止时的历史一致性收尾、Plan/Normal 两种模式。
+- **com.cortex.llm（扩展）**：`StreamEvent` 新增 `Usage` 子类型；`Provider.stream` 增 `String systemSuffix` 形参（Plan Mode 系统提示后缀）；两适配器在流结束后上抛本轮 token 用量、把 `systemSuffix` 拼到内置系统提示后；OpenAI 打开 `ChatCompletionStreamOptions.includeUsage`。
+- **com.cortex.tool（扩展）**：`Tool` 接口增 `boolean readOnly()`；6 个工具各实现；`ToolRegistry` 增 `readOnlyDefinitions()` 与 `isReadOnly(name)`。
+- **com.cortex.conversation（扩展）**：增 `Optional<Role> lastRole()`（终止收尾判断角色尾巴）。
+- **com.cortex.prompt（扩展）**：增 `PLAN_MODE_REMINDER`（计划态系统后缀）与 `EXECUTE_DIRECTIVE`（`/do` 触发执行的用户消息）；`SYSTEM_PROMPT` 增补「持续工作直到任务完成」的 Agent 循环约定。
+- **com.cortex.tui（扩展）**：`submit` 识别 `/plan`、`/do`；引入 per-turn 取消标志位与 cancel 钩子；事件订阅器处理用量 / 进度 / 通知 / 多个并发工具；按键处理拆分 Esc / Ctrl+C；状态栏显示模式与累计用量、动态区显示迭代轮次。
 
 依赖方向不变、无环：`tool → llm`；`conversation → llm`；`agent → {llm, tool, conversation}`；`tui → {agent, tool, conversation, llm, prompt}`；`llm → {config, prompt}`。
 
@@ -20,7 +20,7 @@ ch04 不新增包，在 ch03「tool / agent / llm / conversation / prompt / tui�
 ### llm 包（`StreamEvent` 扩展）
 
 ```java
-package com.mewcode.llm;
+package com.cortex.llm;
 
 // Usage 协议无关地承载一轮请求的 token 用量。
 public record Usage(long inputTokens, long outputTokens) {}
@@ -82,7 +82,7 @@ public boolean isReadOnly(String name);
 ### agent 包（事件模型扩展 + `run` 重写）
 
 ```java
-package com.mewcode.agent;
+package com.cortex.agent;
 
 // Usage 一轮请求的 token 用量（透传 llm.Usage 的语义）。
 public record Usage(long input, long output) {}
@@ -111,7 +111,7 @@ public sealed interface AgentEvent
 
 // Agent.run 执行 Agent Loop，返回事件 Publisher；mode 决定工具集与系统后缀。
 public java.util.concurrent.BlockingQueue<AgentEvent> run(
-        com.mewcode.conversation.ConversationManager conv,
+        com.cortex.conversation.ConversationManager conv,
         Mode mode,
         CancelToken cancel);
 ```
@@ -140,7 +140,7 @@ final class AgentConstants {
 
 ## 模块设计
 
-### com.mewcode.agent（核心：`run` 重写）
+### com.cortex.agent（核心：`run` 重写）
 
 **职责：** ReAct 循环编排（F1/F2）、保序分批并发执行（F5）、事件流（F3/F8/F9）、终止历史一致性（F6）、Plan/Normal 模式（F10）。
 **对外接口：** `Agent`、构造函数、`run(conv, mode, cancel)`、`Event` sealed 接口、`ToolEvent`、`Phase`、`Mode`、`Usage`、`CancelToken`。
@@ -203,7 +203,7 @@ final class AgentConstants {
 
 > 终止优先级：执行中取消（`batch.completed()==false`）是**最高优先级**终止——立即 `ensureAssistantTail` 并 `return`，**跳过**未知工具计数与迭代上限检查。
 
-### com.mewcode.llm（扩展）
+### com.cortex.llm（扩展）
 
 **职责：** 协议无关请求/响应 + 两协议工具调用全流程（沿用 ch03）+ 本轮用量上抛（F8）+ 系统后缀（F10）。
 
@@ -223,14 +223,14 @@ final class AgentConstants {
 - 系统提示：`toOpenAIMessages` 接收 `suffix`，把首条 system 消息文本由 `Prompt.SYSTEM_PROMPT` 改为拼接 `suffix`（非空时 `+"\n\n"+suffix`）。
 - 用量：流结束后从累加器读 `CompletionUsage`：`pub.submit(new StreamEvent.UsageEvent(new Usage(usage.promptTokens(), usage.completionTokens())))`。
 
-### com.mewcode.tool（扩展）
+### com.cortex.tool（扩展）
 
 - `Tool` 接口加 `boolean readOnly()`；6 个工具各加一行实现（read/glob/grep 返回 true，write/edit/bash 返回 false）。
 - `Registry.readOnlyDefinitions()`：仿 `definitions()`，仅收 `tools.get(name).readOnly()==true` 的项，保持注册顺序。
 - `Registry.isReadOnly(name)`：`Optional<Tool> t = get(name); return t.isPresent() && t.get().readOnly();`（未知工具 false）。
 - `execute`、`Tool.DEFAULT_TIMEOUT`、6 工具的执行逻辑均不变。
 
-### com.mewcode.conversation（扩展）
+### com.cortex.conversation（扩展）
 
 ```java
 // lastRole 返回最后一条消息的角色;空历史返回 Optional.empty()。
@@ -239,7 +239,7 @@ public java.util.Optional<Role> lastRole();
 
 其余沿用 ch03。
 
-### com.mewcode.prompt（扩展）
+### com.cortex.prompt（扩展）
 
 ```java
 // PLAN_MODE_REMINDER:Plan Mode 系统提示后缀,拼接到 SYSTEM_PROMPT 之后。
@@ -255,9 +255,9 @@ public static final String EXECUTE_DIRECTIVE = "请按上面的计划开始执�
 
 `SYSTEM_PROMPT` 增补一句 Agent 循环约定（追加到现有文案）：`"Keep using tools across multiple steps to make progress, and only give your final concise answer once the task is complete."`（中文项目里保持英文 system prompt 风格，与 ch03 现有 `SYSTEM_PROMPT` 一致）。
 
-### com.mewcode.tui（扩展）
+### com.cortex.tui（扩展）
 
-**`MewCodeModel` 新增字段：**
+**`CortexModel` 新增字段：**
 
 - `Mode mode`——当前模式（默认 `Mode.NORMAL`），`/plan`、`/do` 切换，跨轮保持。
 - `int iter`——当前迭代轮次（进度显示），每 `Event.Iter` 更新，`finishTurn` 归零。
@@ -265,7 +265,7 @@ public static final String EXECUTE_DIRECTIVE = "请按上面的计划开始执�
 - `List<ToolDisplay> curTools`——替换 ch03 的单个 `ToolDisplay curTool`，支持并发批多个在执行的工具行。
 - `CancelToken turnCancel`——本轮取消句柄（每次 `submit` 重新建），Esc / Ctrl+C 触发；程序级退出走全局 shutdown hook。
 
-**`submit`（`AgentEvent 队列.java` 或 `MewCodeModel.onSubmit`）：**
+**`submit`（`AgentEvent 队列.java` 或 `CortexModel.onSubmit`）：**
 
 1. `/exit` → 退出（沿用）。
 2. `/plan` → `this.mode = Mode.PLAN`；提交一行提示块到 scrollback（如「已进入计划模式（只读工具）」）；回空闲态。
@@ -305,7 +305,7 @@ public static final String EXECUTE_DIRECTIVE = "请按上面的计划开始执�
 
 ```
 用户提交 /do 或普通文本
-  └─ MewCodeModel.onSubmit:
+  └─ CortexModel.onSubmit:
        ├─ /plan → mode=PLAN,回 IDLE
        ├─ /do   → mode=NORMAL; conv.addUser(EXECUTE_DIRECTIVE)
        ├─ 文本  → conv.addUser(text)
@@ -338,9 +338,9 @@ public static final String EXECUTE_DIRECTIVE = "请按上面的计划开始执�
 ## 文件组织
 
 ```
-mewcode/
+cortex/
 ├── build.gradle.kts                         — 修改：新增 JUnit `assertj`（可选）以便并发断言；其余依赖沿用
-├── src/main/java/com/mewcode/
+├── src/main/java/com/cortex/
 │   ├── llm/
 │   │   ├── StreamEvent.java        — 修改:sealed 新增 UsageEvent;新增 Usage record
 │   │   ├── Provider.java           — 修改:stream 加 systemSuffix 形参
@@ -361,18 +361,18 @@ mewcode/
 │   ├── prompt/
 │   │   └── Prompt.java             — 修改:PLAN_MODE_REMINDER、EXECUTE_DIRECTIVE;SYSTEM_PROMPT 增循环约定
 │   └── tui/
-│       ├── MewCodeModel.java             — 修改:字段增 mode/iter/usage/curTools/turnCancel;按键拆分 Esc/Ctrl+C
+│       ├── CortexModel.java             — 修改:字段增 mode/iter/usage/curTools/turnCancel;按键拆分 Esc/Ctrl+C
 │       ├── AgentEvent 队列.java         — 修改:onNext 用 switch pattern match 分派 UsageReport/Iter/Notice/Tool/Text
 │       └── Styles.java + MarkdownRenderer.java               — 修改:状态栏模式徽标+累计用量;动态区迭代轮次+多并发工具行
-├── src/test/java/dev/mewcode/
+├── src/test/java/dev/cortex/
 │   ├── agent/AgentTest.java        — 扩展:多轮 fake provider(`List<List<StreamEvent>>` 多次 stream)、并发分批、停止条件、Plan 工具集
 │   └── conversation/ConversationTest.java
 │                                   — 扩展:lastRole 断言
-└── src/test/java/dev/mewcode/smoke/SmokeMewCode.java
+└── src/test/java/dev/cortex/smoke/SmokeCortex.java
                                     — 修改:Agent.run 调用处补 mode 实参(Mode.NORMAL)
 ```
 
-> 注：`MewCode.java` 已在 ch03 注入 `ToolRegistry`，ch04 无需改动；`mode` 状态存于 `MewCodeModel`，不经 `MewCode`。
+> 注：`Cortex.java` 已在 ch03 注入 `ToolRegistry`，ch04 无需改动；`mode` 状态存于 `CortexModel`，不经 `Cortex`。
 
 ### 签名变更的调用方清单（实测核对，确保编译不漏）
 
@@ -384,7 +384,7 @@ ch04 改了两个签名，必须同步所有调用方/实现方，否则编译�
   - 测试实现方：`AgentTest.FakeProvider#stream`（也实现该接口，签名须同步）。
   - **`SmokeMain` 不直接调 `stream`**（它走 `Agent.run`），无需为 `systemSuffix` 改动。
 - **`Agent.run` 增 `Mode mode` 与 `CancelToken cancel`（新增第 2、3 形参）**：
-  - 调用方：`MewCodeModel` / `AgentEvent 队列` 内（`onSubmit`）、`SmokeMain`（旧调用 `agent.run(conv)`）、`AgentTest`（各用例）。三者都要补 `mode` / `cancel` 实参（smoke / 旧用例传 `Mode.NORMAL` + `new CancelToken()`）。
+  - 调用方：`CortexModel` / `AgentEvent 队列` 内（`onSubmit`）、`SmokeMain`（旧调用 `agent.run(conv)`）、`AgentTest`（各用例）。三者都要补 `mode` / `cancel` 实参（smoke / 旧用例传 `Mode.NORMAL` + `new CancelToken()`）。
 
 ## 技术决策
 
@@ -404,7 +404,7 @@ ch04 改了两个签名，必须同步所有调用方/实现方，否则编译�
 | Plan Mode 系统提示注入     | `Provider.stream` 加 `String systemSuffix` 形参                                          | 系统提示在适配器内注入，要让计划态约束生效必须穿过 `stream`。加一个字符串形参最小且显式；备选「请求 options record」更可扩展但改动面更大，YAGNI 下不引入。                                            |
 | Plan Mode 工具集           | 计划态只注入 `readOnlyDefinitions()`                                                     | 物理上不给模型写/执行工具，即便提示被忽略也无法改动；只读分类靠 `Tool.readOnly()`。                                                                                                                   |
 | `/do` 语义                 | 切回 Normal + 注入 `EXECUTE_DIRECTIVE` 用户消息 + 立即启动 Loop                          | 用户选定「切回全工具并立即执行」；复用已在历史里的计划，`/do` 不入历史，只把执行指令作为用户消息驱动模型开干。                                                                                        |
-| 模式状态存放               | 存于 `MewCodeModel`，不进 `ConversationManager`                                          | `ConversationManager` 是历史、`messages()` 返回副本，放不住可变模式；模式是会话级 UI 状态，跨轮保持，归 TUI 最自然。                                                                                  |
+| 模式状态存放               | 存于 `CortexModel`，不进 `ConversationManager`                                          | `ConversationManager` 是历史、`messages()` 返回副本，放不住可变模式；模式是会话级 UI 状态，跨轮保持，归 TUI 最自然。                                                                                  |
 | 多并发工具的 UI            | `List<ToolDisplay> curTools` 取代单个 `ToolDisplay`                                      | 并发批同时有多个工具在跑，动态区需多行展示；结束事件按序逐个落 scrollback。                                                                                                                           |
 | 进度事件                   | 每轮起始 emit `Event.Iter(n)`，UI 显示「第 N 轮」                                        | F9 让用户感知多轮推进；用 sealed 子类型分派，与 ch03 的事件惯例一致。                                                                                                                                 |
 | 通知 vs 历史               | 上限/未知工具的提示同时 emit `Event.Notice` 与 `ensureAssistantTail` 写入 assistant 历史 | UI 要让用户看到为何停；写入历史是为满足 `ensureAssistantTail`（角色交替），二者用同一文案，避免历史里留空 assistant 回合。                                                                            |

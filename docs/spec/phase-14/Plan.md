@@ -14,14 +14,14 @@
 
 ## 架构概览
 
-本章引入 `com.mewcode.teams` 顶层包,把 ch13 SubAgent 的「子 Agent」扩展为「Team 队员」。整体分四层:
+本章引入 `com.cortex.teams` 顶层包,把 ch13 SubAgent 的「子 Agent」扩展为「Team 队员」。整体分四层:
 
 1. **数据模型层**(`team/Team.java` + `team/TeamManager.java` + `team/persistence/`)——Team、TeammateInfo 数据结构与持久化
 2. **后端层**(`team/backend/`)——`Backend` 接口与三种实现 tmux / iterm2 / inprocess,屏蔽 spawn 差异
 3. **协作层**(`team/mailbox/`、`team/registry/`、`team/tasks/`)——邮箱(含文件锁)、AgentNameRegistry、共享任务列表
 4. **工具与集成层**(`team/tools/` + `agent` 包扩展 + `coordinator` 包)——5 个协作工具 + `Agent` 工具的 `teamName` 分支 + Coordinator Mode
 
-Lead 仍是 `MewCodeModel.mainAgent()`——本期 Lead 没有独立类型,通过 `Coordinator.isEnabled(cfg)` 在启动时收窄其工具集即可。
+Lead 仍是 `CortexModel.mainAgent()`——本期 Lead 没有独立类型,通过 `Coordinator.isEnabled(cfg)` 在启动时收窄其工具集即可。
 
 依赖方向(单向):
 ```
@@ -32,10 +32,10 @@ tui  ──→  agent  ──→  team  ──→  team/{backend,mailbox,registr
 
 ## 核心数据结构
 
-### `com.mewcode.teams.Team`
+### `com.cortex.teams.Team`
 
 ```java
-package com.mewcode.teams;
+package com.cortex.teams;
 
 public final class Team {
     private final ReentrantLock lock = new ReentrantLock();
@@ -63,10 +63,10 @@ public final class Team {
 }
 ```
 
-### `com.mewcode.teams.TeammateInfo`
+### `com.cortex.teams.TeammateInfo`
 
 ```java
-package com.mewcode.teams;
+package com.cortex.teams;
 
 public record TeammateInfo(
     @JsonProperty("name")             String name,
@@ -83,10 +83,10 @@ public record TeammateInfo(
 ) {}
 ```
 
-### `com.mewcode.teams.TeamManager`
+### `com.cortex.teams.TeamManager`
 
 ```java
-package com.mewcode.teams;
+package com.cortex.teams;
 
 public final class TeamManager {
     private final ReentrantLock lock = new ReentrantLock();
@@ -104,7 +104,7 @@ public final class TeamManager {
 }
 ```
 
-### `com.mewcode.teams.BackendType`
+### `com.cortex.teams.BackendType`
 
 ```java
 public enum BackendType {
@@ -116,10 +116,10 @@ public enum BackendType {
 }
 ```
 
-### `com.mewcode.teams.backend.Backend`
+### `com.cortex.teams.backend.Backend`
 
 ```java
-package com.mewcode.teams.backend;
+package com.cortex.teams.backend;
 
 public interface Backend {
     BackendType type();
@@ -147,10 +147,10 @@ public record SpawnRequest(
 ) {}
 ```
 
-### `com.mewcode.teams.mailbox.Message` / `Mailbox`
+### `com.cortex.teams.mailbox.Message` / `Mailbox`
 
 ```java
-package com.mewcode.teams.mailbox;
+package com.cortex.teams.mailbox;
 
 public enum MessageType {
     TEXT("text"),
@@ -182,12 +182,12 @@ public final class Mailbox {
 }
 ```
 
-文件锁机制由 `com.mewcode.teams.filelock.FileLock` 提供,所有公开方法都走锁。
+文件锁机制由 `com.cortex.teams.filelock.FileLock` 提供,所有公开方法都走锁。
 
-### `com.mewcode.teams.registry.AgentNameRegistry`
+### `com.cortex.teams.registry.AgentNameRegistry`
 
 ```java
-package com.mewcode.teams.registry;
+package com.cortex.teams.registry;
 
 public final class AgentNameRegistry {
     private final ReentrantLock lock = new ReentrantLock();
@@ -205,10 +205,10 @@ public final class AgentNameRegistry {
 
 注意:本章把 `TaskManager.byName` 替换/委托给这套 registry——`TaskManager` 改为持一个 `AgentNameRegistry` 引用。
 
-### `com.mewcode.teams.tasks.Store`
+### `com.cortex.teams.tasks.Store`
 
 ```java
-package com.mewcode.teams.tasks;
+package com.cortex.teams.tasks;
 
 public enum Status {
     PENDING("pending"), IN_PROGRESS("in_progress"),
@@ -252,10 +252,10 @@ public final class Store {
 }
 ```
 
-### `com.mewcode.teams` 包
+### `com.cortex.teams` 包
 
 ```java
-package com.mewcode.teams;
+package com.cortex.teams;
 
 public final class Coordinator {
     public static boolean isEnabled(AppConfig cfg);
@@ -268,13 +268,13 @@ public final class Coordinator {
 
 ## 模块设计
 
-### `com.mewcode.teams`(顶层)
+### `com.cortex.teams`(顶层)
 
 **职责:** Team / TeammateInfo / TeamManager 数据结构与持久化,跨子包的协调入口。
 **对外接口:** `new TeamManager(...)`、`TeamManager.create/get/list/delete`、`Team.addMember/setMemberActive/removeMember`
 **依赖:** `worktree`、`task`、`session`、`team.backend`、`team.mailbox`、`team.registry`、`team.tasks`
 
-### `com.mewcode.teams.backend`
+### `com.cortex.teams.backend`
 
 **职责:** 屏蔽 tmux / iterm2 / in-process spawn 差异。
 **对外接口:** `Backend` 接口、`Backend.detect()`、`BackendFactory.create(BackendType, Deps)`
@@ -284,31 +284,31 @@ public final class Coordinator {
 
 **采用方案:** 三种后端各一个子包(`tmux/` / `iterm2/` / `inprocess/`),每个独立实现 `Backend` 接口,工厂方法 `create(...)` 接收所需依赖。`inprocess` 子包依赖 `agent` 包没问题(`agent` 在更低层)。
 
-### `com.mewcode.teams.mailbox`
+### `com.cortex.teams.mailbox`
 
 **职责:** 邮箱文件 + 文件锁的读写。
 **对外接口:** `Mailbox.write/read/readUnread/markRead`、`Message` 类型
 **依赖:** 仅 JDK + Jackson(`java.nio.file`、`com.fasterxml.jackson.databind`)
 
-### `com.mewcode.teams.registry`
+### `com.cortex.teams.registry`
 
 **职责:** Agent name ↔ agentId 双向映射。
 **对外接口:** `register/unregister/resolve/nameOf`
 **依赖:** 仅 JDK
 
-### `com.mewcode.teams.tasks`
+### `com.cortex.teams.tasks`
 
 **职责:** 共享任务列表的 CRUD + 依赖图维护。
 **对外接口:** `Store.create/get/list/update`、`Task`、`Filter`、`Patch` 类型
 **依赖:** 仅 JDK + Jackson + `team.filelock`
 
-### `com.mewcode.teams.tools`
+### `com.cortex.teams.tools`
 
 **职责:** 5 个协作工具实现(TaskCreate、TaskGet、TaskList、TaskUpdate、SendMessage)+ 2 个 Team 管理工具(TeamCreate、TeamDelete)。
 **对外接口:** 每个工具一个构造函数 `new XxxTool(teamManager)` 实现 `Tool` 接口
 **依赖:** `tool`、`team`、`team.{mailbox,registry,tasks}`
 
-### `com.mewcode.teams`
+### `com.cortex.teams`
 
 **职责:** Coordinator Mode 的开关检测、工具白名单、系统提示词。
 **对外接口:** `isEnabled(cfg)`、`allowedTools()`、`systemPromptSuffix()`
@@ -338,8 +338,8 @@ public final class Coordinator {
 
 ### `tui` 包扩展
 
-- `MewCodeModel` 新增字段 `TeamManager teamManager`
-- 注入 `/team` 系列 slash 命令(`com.mewcode.command.builtin.BuiltinTeam`)
+- `CortexModel` 新增字段 `TeamManager teamManager`
+- 注入 `/team` 系列 slash 命令(`com.cortex.command.builtin.BuiltinTeam`)
 - 状态栏新增 `[COORDINATOR]` 标签(若 `Coordinator.isEnabled(cfg)`)
 
 ## 模块交互
@@ -355,8 +355,8 @@ TeamManager.create("demo", "")
   ↓
 1. sanitize("demo") → "demo"
 2. Backend.detect() → TMUX
-3. Files.createDirectories(~/.mewcode/teams/demo/)
-4. Files.createDirectories(~/.mewcode/teams/demo/mailbox/)
+3. Files.createDirectories(~/.cortex/teams/demo/)
+4. Files.createDirectories(~/.cortex/teams/demo/mailbox/)
 5. 写 config.json(原子;.tmp + ATOMIC_MOVE)
 6. team.members = [new TeammateInfo("lead","lead", ..., null)]
 7. teams.put("demo", team)
@@ -451,7 +451,7 @@ backend.wake(leadPaneId, leadAgentId)  // 若 Lead 是 Pane 后端
 ### Coordinator Mode 启用路径
 
 ```
-MewCode.java 启动时,在构造主 Agent 后:
+Cortex.java 启动时,在构造主 Agent 后:
   ↓
 if (Coordinator.isEnabled(cfg)) {
     mainAgent.setAllowedTools(Coordinator.allowedTools());
@@ -465,7 +465,7 @@ TUI 渲染 statusbar 时检测 `coordinatorMode` 添加 `[COORDINATOR]` 标签�
 ## 文件组织
 
 ```
-src/main/java/com/mewcode/
+src/main/java/com/cortex/
 ├── team/
 │   ├── package-info.java                 — 包文档
 │   ├── Team.java                         — Team 类
@@ -530,7 +530,7 @@ src/main/java/com/mewcode/
 │   └── BuiltinTeam.java                  — 新建:/team list/info/delete/kill 4 个命令
 │
 ├── tui/
-│   ├── MewCodeModel.java                       — 修改:接收 teamManager;启动时检测 Coordinator
+│   ├── CortexModel.java                       — 修改:接收 teamManager;启动时检测 Coordinator
 │   ├── Statusbar.java                    — 修改:渲染 [COORDINATOR] 标签
 │   ├── LeadMailWatcher.java              — 新建:每秒轮询 lead mailbox
 │   └── LeadMailWaiter.java               — 新建:阻塞等 leadMailQueue 信号
@@ -541,21 +541,21 @@ src/main/java/com/mewcode/
 ├── cli/
 │   └── TeamMemberRunner.java             — 新建:--team-member 子进程自治循环入口
 │
-└── MewCode.java                             — 修改:wire TeamManager,注册 7 个新工具,接入 Coordinator,
+└── Cortex.java                             — 修改:wire TeamManager,注册 7 个新工具,接入 Coordinator,
                                             --team-member 分支
 ```
 
-测试目录镜像 `src/test/java/dev/mewcode/team/...`,所有公开类都有 JUnit 5 测试。
+测试目录镜像 `src/test/java/dev/cortex/team/...`,所有公开类都有 JUnit 5 测试。
 
 ## 技术决策
 
 | 决策点 | 选择 | 理由 |
 |--------|------|------|
-| Team 包归属 | `com.mewcode.teams` 顶层 | 与 ch13 `subagent`、ch14 `worktree` 平级,职责清晰 |
+| Team 包归属 | `com.cortex.teams` 顶层 | 与 ch13 `subagent`、ch14 `worktree` 平级,职责清晰 |
 | 后端三选一时机 | `Backend.detect()` 在 `TeamCreate` 时一次性决定 | 与 README 一致:不做运行时回退,行为可预测 |
 | 后端实现拆分 | 各一个子包 `tmux/iterm2/inprocess` | `inprocess` 需要依赖 `agent` 包,拆开避免污染其他 backend |
 | Backend 接口 | 三方法 `spawn/wake/kill` | 最小集;不引入 pause/resume(本期不做) |
-| Lead 表示 | 不引入独立类型,Lead = `MewCodeModel.mainAgent()` | 收窄改动;Coordinator Mode 在工具集层面区分 |
+| Lead 表示 | 不引入独立类型,Lead = `CortexModel.mainAgent()` | 收窄改动;Coordinator Mode 在工具集层面区分 |
 | 邮箱实现 | `<teamConfigDir>/mailbox/<agentId>.json` + 同名 `.lock` | 跨进程通信现成方案;in-process 与 Pane 共用一套 |
 | 锁文件参数 | `StandardOpenOption.CREATE_NEW`,5-100ms 抖动 10 次,>10s 视 stale | README 明定;避免雪崩 |
 | 任务存储 | `<teamConfigDir>/tasks.json` 单文件 | Team 内任务量小(几十条),无需 DB;原子写 + 文件锁 |
@@ -563,7 +563,7 @@ src/main/java/com/mewcode/
 | `TaskManager` 改造 | 加 `onTaskDone` 回调,Team 注册 | 依赖反转,避免 task 包反向依赖 team |
 | Team 持久化原子性 | `<file>.tmp` + `Files.move(...,ATOMIC_MOVE)` | 与 ch14 worktree session、ch12 session 一致 |
 | Worktree 命名 | `team-<sanitizedTeam>/<member>`(嵌套 slug,`/` → `+`) | 复用 ch14 嵌套 slug 能力;不污染顶层 worktree 命名空间 |
-| Member sessionDir | 沿用 ch12 `<root>/.mewcode/sessions/<id>/` 格式 | 复用 `session.Writer`,无需新机制;Team 删除时一并清理 |
+| Member sessionDir | 沿用 ch12 `<root>/.cortex/sessions/<id>/` 格式 | 复用 `session.Writer`,无需新机制;Team 删除时一并清理 |
 | Coordinator 开启检测 | `Feature.has("COORDINATOR_MODE", cfg) && envTruthy(env)` | README 明定双锁;一次决定不允许运行时改 |
 | Coordinator 工具白名单 | 硬编码常量,启动时直接 `setAllowedTools` | LLM 无法解锁,安全边界清晰 |
 | Plan 审批本期形态 | 文本 Plan + Lead 用 `plan_approval_response` 回复 | 不强制结构化 Plan 类型,降低实现成本 |

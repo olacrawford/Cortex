@@ -6,25 +6,25 @@
 
 | 新包 | 职责 |
 |------|------|
-| `com.mewcode.instructions` | 三层 MEWCODE.md 加载 + @include 展开 |
-| `com.mewcode.session` | JSONL 会话写入、列表扫描、加载恢复、过期清理 |
-| `com.mewcode.memory` | 笔记 CRUD、索引管理、异步 LLM 更新 |
+| `com.cortex.instructions` | 三层 MEWCODE.md 加载 + @include 展开 |
+| `com.cortex.session` | JSONL 会话写入、列表扫描、加载恢复、过期清理 |
+| `com.cortex.memory` | 笔记 CRUD、索引管理、异步 LLM 更新 |
 
 | 已有包 | 改动 |
 |--------|------|
-| `com.mewcode.prompt` | `buildSystemPrompt` 接受 instructions/memory 参数 |
-| `com.mewcode.conversation` | 新增 onAppend/onReplace 回调 |
-| `com.mewcode.compact.SessionContext` | session ID 格式改为 YYYYMMDD-HHMMSS-xxxx；加 `sessionDir` 字段 |
-| `com.mewcode.agent` | 每 5 轮 `run` 结束后触发记忆更新 |
-| `com.mewcode.tui` | 新增 /resume 命令和 `SessionState.RESUMING` 状态 |
-| `com.mewcode.MewCode` | 启动流程串联指令加载、记忆初始化、会话清理 |
+| `com.cortex.prompt` | `buildSystemPrompt` 接受 instructions/memory 参数 |
+| `com.cortex.conversation` | 新增 onAppend/onReplace 回调 |
+| `com.cortex.compact.SessionContext` | session ID 格式改为 YYYYMMDD-HHMMSS-xxxx；加 `sessionDir` 字段 |
+| `com.cortex.agent` | 每 5 轮 `run` 结束后触发记忆更新 |
+| `com.cortex.tui` | 新增 /resume 命令和 `SessionState.RESUMING` 状态 |
+| `com.cortex.Cortex` | 启动流程串联指令加载、记忆初始化、会话清理 |
 
 ## 核心数据结构
 
 ### instructions 包
 
 ```java
-package com.mewcode.instructions;
+package com.cortex.instructions;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -52,11 +52,11 @@ public final class Loader {
 ### session 包
 
 ```java
-package com.mewcode.session;
+package com.cortex.session;
 
-import com.mewcode.llm.Message;
-import com.mewcode.llm.ToolCall;
-import com.mewcode.llm.ToolResult;
+import com.cortex.llm.Message;
+import com.cortex.llm.ToolCall;
+import com.cortex.llm.ToolResult;
 import java.io.Closeable;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -125,10 +125,10 @@ public final class SessionCleaner {
 ### memory 包
 
 ```java
-package com.mewcode.memory;
+package com.cortex.memory;
 
-import com.mewcode.llm.Message;
-import com.mewcode.llm.Provider;
+import com.cortex.llm.Message;
+import com.cortex.llm.Provider;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
@@ -171,7 +171,7 @@ public record UpdateAction(
 
 // Store 管理单级（项目级或用户级）的笔记文件和索引。
 public final class Store {
-    private final Path dir; // .mewcode/memory/ 或 ~/.mewcode/memory/
+    private final Path dir; // .cortex/memory/ 或 ~/.cortex/memory/
     private final ReentrantLock lock = new ReentrantLock();
 
     public Store(Path dir) { ... }
@@ -198,9 +198,9 @@ public final class Manager {
 ### conversation 包（修改）
 
 ```java
-package com.mewcode.conversation;
+package com.cortex.conversation;
 
-import com.mewcode.llm.Message;
+import com.cortex.llm.Message;
 import java.util.List;
 import java.util.function.Consumer;
 
@@ -225,14 +225,14 @@ public final class Conversation {
 ### compact 包（修改）
 
 ```java
-package com.mewcode.compact;
+package com.cortex.compact;
 
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 
 public final class SessionContext {
     public final String sessionId;  // 形如 "20260601-143022-a1b2"
-    public final Path sessionDir;   // <workspace>/.mewcode/sessions/<sessionId>
+    public final Path sessionDir;   // <workspace>/.cortex/sessions/<sessionId>
     public final Path spillDir;     // sessionDir.resolve("tool-results")
 
     public static SessionContext create(Path workspace) { ... }
@@ -248,7 +248,7 @@ public final class SessionContext {
 ### prompt 包（修改）
 
 ```java
-package com.mewcode.prompt;
+package com.cortex.prompt;
 
 public final class Prompt {
     // buildSystemPrompt 组装完整系统提示。
@@ -261,16 +261,16 @@ public final class Prompt {
 ### agent 包（修改）
 
 ```java
-package com.mewcode.agent;
+package com.cortex.agent;
 
 public final class Agent {
-    private final com.mewcode.memory.Manager memMgr; // 可空：记忆更新管理器
+    private final com.cortex.memory.Manager memMgr; // 可空：记忆更新管理器
     private final String instructionText;            // 注入 system prompt
     private final String memoryText;                 // 注入 system prompt
     // ... 已有字段
 
     public static final class Builder {
-        public Builder memoryManager(com.mewcode.memory.Manager m) { ... }
+        public Builder memoryManager(com.cortex.memory.Manager m) { ... }
         public Builder instructionText(String s) { ... }
         public Builder memoryText(String s) { ... }
         public Agent build() { ... }
@@ -283,8 +283,8 @@ public final class Agent {
 ### 启动流程
 
 ```
-MewCode.main()
-  ├─ ConfigLoader.load(Path.of(".mewcode/config.yaml"))
+Cortex.main()
+  ├─ ConfigLoader.load(Path.of(".cortex/config.yaml"))
   ├─ new Loader(projectRoot).load() → instructionText
   ├─ new Manager(projectMemDir, userMemDir, null, "") → memMgr
   │   （provider 未选定时先空，选定后 setProvider）
@@ -298,7 +298,7 @@ MewCode.main()
   ├─ PermissionEngine.create()
   ├─ SessionRuntime.create(ctxWindow)
   │   └─ runtime.session = sesCtx
-  └─ new MewCodeModel(providers, ..., writer, memMgr, instructionText, memoryText).run()
+  └─ new CortexModel(providers, ..., writer, memMgr, instructionText, memoryText).run()
        └─ 选定 provider 后：
            ├─ memMgr.setProvider(provider, model)
            └─ Agent.builder()...memoryManager(memMgr).build()
@@ -341,7 +341,7 @@ TUI: /resume → SessionState.RESUMING
   │   ├─ Conversation.fromMessages(msgs, onAppend, onReplace) → newConv
   │   ├─ SessionContext.open(root, selectedId) → newSesCtx
   │   ├─ Writer.open(selectedDir) → newWriter
-  │   ├─ 替换 MewCodeModel 的 conv、writer、sesCtx、runtime.session
+  │   ├─ 替换 CortexModel 的 conv、writer、sesCtx、runtime.session
   │   ├─ 显示 "已恢复会话 <id>，共 N 条消息"
   │   └─ SessionState.IDLE
   └─ Esc → SessionState.IDLE（不变）
@@ -374,10 +374,10 @@ Agent 回复 "hi!"
 ## 文件组织
 
 ```
-mewcode/
+cortex/
 ├── build.gradle.kts
-├── src/main/java/com/mewcode/
-│   ├── MewCode.java                            — 启动流程串联
+├── src/main/java/com/cortex/
+│   ├── Cortex.java                            — 启动流程串联
 │   ├── instructions/
 │   │   └── Loader.java                      — 三层加载、@include 展开
 │   ├── session/
@@ -407,14 +407,14 @@ mewcode/
 │   └── tui/
 │       ├── Commands.java                    — /resume 注册
 │       ├── ResumeStyles.java + MarkdownRenderer.java                  — RESUMING、会话列表项、updateResuming
-│       └── MewCodeModel.java                      — RESUMING 集成、字段新增
-├── src/test/java/dev/mewcode/
+│       └── CortexModel.java                      — RESUMING 集成、字段新增
+├── src/test/java/dev/cortex/
 │   ├── instructions/LoaderTest.java
 │   ├── session/SessionTest.java
 │   ├── memory/MemoryTest.java
 │   ├── prompt/PromptTest.java
 │   └── conversation/ConversationTest.java
-└── .mewcode/config.yaml
+└── .cortex/config.yaml
 ```
 
 ## 技术决策

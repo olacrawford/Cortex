@@ -1,11 +1,11 @@
 # SubAgent 机制 Spec## 背景
 
-MewCode 目前是单 Agent 架构：所有任务在同一个对话上下文里执行。这导致两个问题：
+Cortex 目前是单 Agent 架构：所有任务在同一个对话上下文里执行。这导致两个问题：
 
 1. **上下文污染**：长任务后再做无关任务,前序中间结果(读过的文件、diff、错误回放)成为后续任务的噪声,token 飙升、响应质量下降
 2. **无法并行**：没有把独立子任务分发出去并行执行的机制,主对话被长任务阻塞
 
-mewcode 已经有「子 Agent 雏形」：
+cortex 已经有「子 Agent 雏形」：
 
 - ch11 Skill fork 模式通过 `agent.WithAllowedTools` 创建受限子 Agent(tui/SkillFork.java `runSubAgent`),走 `subAgent.run(...)` 跑完一轮
 - `Conversation.fromMessages` / `replaceMessages` 已支持深拷贝消息列表
@@ -17,7 +17,7 @@ mewcode 已经有「子 Agent 雏形」：
 - 没有 **工具过滤多层防线**——子 Agent 理论上可以无限嵌套
 - Skill fork 与未来 SubAgent 工具两套代码并存
 
-本章把上述能力补齐,让 mewcode 从单 Agent 进化到可分发任务的主从架构。
+本章把上述能力补齐,让 cortex 从单 Agent 进化到可分发任务的主从架构。
 
 ## 目标- **G1**:提供统一的 Agent 工具,主 Agent 通过 `subagent_type` 参数选择预定义角色或留空走 Fork 路径;工具列表对模型始终稳定(不因角色定义增减而变化)
 - **G2**:子 Agent 拥有独立的运行时状态——**消息**、**权限账本**(独立 Engine 决策状态)、**文件读缓存**、**token 计数**;共享基础设施——LLM 客户端、Hook 引擎、文件系统、`ToolRegistry`
@@ -56,8 +56,8 @@ mewcode 已经有「子 Agent 雏形」：
   - `permissionMode`(可选):`default` / `acceptEdits` / `plan` / `bypassPermissions` / `dontAsk`,缺省 `default`;`dontAsk` 是子 Agent 专属——自动批准所有规则未命中的工具
   - `background`(可选,bool):缺省 false;true 时 Agent 工具忽略 `run_in_background` 参数、强制后台
 - **F5**:Catalog 三层加载(本期插件级恒为空),顺序:
-  1. 项目级:`<root>/.mewcode/agents/*.md`
-  2. 用户级:`~/.mewcode/agents/*.md`
+  1. 项目级:`<root>/.cortex/agents/*.md`
+  2. 用户级:`~/.cortex/agents/*.md`
   3. 内置级:Jar 内 classpath resource `subagent/builtin/*.md`(`Class.getResourceAsStream`)
 - **F6**:同名定义按 source 优先级覆盖——项目级 > 用户级 > 内置级;`resolve(name)` 返回优先级最高的版本
 - **F7**:Catalog 启动期加载,加载失败的单个文件(frontmatter 不合法、name 重名以外的字段错)走 stderr 警告并跳过,不阻断启动
@@ -70,7 +70,7 @@ mewcode 已经有「子 Agent 雏形」：
   - 触达 maxTurns 时返回最后一条 assistant 文本 + 「达到最大轮数」异常
   - 同一段循环代码与主对话 `run` 共用,不重复实现
 - **F10**:新增 Agent Builder 选项:
-  - `systemPrompt(text)`:子 Agent 启动时把 text 作为 system prompt 注入(覆盖默认 mewcode 主 Agent 系统提示)
+  - `systemPrompt(text)`:子 Agent 启动时把 text 作为 system prompt 注入(覆盖默认 cortex 主 Agent 系统提示)
   - `provider(p)`:让子 Agent 用与父不同的 provider(model 覆盖时切换)
   - `maxTurns(n)`:限制本 Agent 的最大迭代轮数
   - `permissionMode(m)`:子 Agent 启动模式
@@ -162,7 +162,7 @@ mewcode 已经有「子 Agent 雏形」：
   2. 复用 `Agent.runToCompletion` 与 SubAgent 的工具过滤、消息装填路径
   3. 返回 finalText 行为不变(`host.appendAssistantMessage` 仍由 Executor 调)
 
-## 非功能需求- **N1**:工具列表稳定——主 Agent 看到的工具集不因 `.mewcode/agents/` 增减或 Agent 工具被调用而变化(防止 prompt cache 抖动)
+## 非功能需求- **N1**:工具列表稳定——主 Agent 看到的工具集不因 `.cortex/agents/` 增减或 Agent 工具被调用而变化(防止 prompt cache 抖动)
 - **N2**:Fork 路径首次请求命中 prompt cache——`buildForkedMessages` 拼接的消息列表与父对话末尾完全一致,系统提示一致
 - **N3**:子 Agent 崩溃不影响主程序——`Manager.launch` 的 virtual thread 包 try/catch,任何 `Throwable` 转 `status=FAILED` + 错误信息回灌
 - **N4**:启动期 fail-fast——内置定义 classpath 资源解析失败立刻抛 `RuntimeException`(代码 bug),用户/项目级定义文件解析失败仅 stderr 警告并跳过
@@ -196,10 +196,10 @@ mewcode 已经有「子 Agent 雏形」：
 - **AC13**:`TaskList` 工具返回当前后台任务列表,字段含 id/name/status/tool_count
 - **AC14**:`TaskGet({task_id})` 返回 result;`TaskStop({task_id})` 触发取消,任务 status 变 CANCELLED
 - **AC15**:`SendMessage({name,message})` 让一个仍存活的后台 Agent 接到新任务并重新跑动,跑完结果作为新 `<task-notification>` 注入主对话
-- **AC16**:项目级 `.mewcode/agents/explore.md` 覆盖内置 `explore`,`resolve("explore")` 返回项目级版本
+- **AC16**:项目级 `.cortex/agents/explore.md` 覆盖内置 `explore`,`resolve("explore")` 返回项目级版本
 - **AC17**:Skill fork 模式调用走 SubAgent 底座——`tui/SkillFork.java` 的 `runSubAgent` 内部只是装饰参数后调 `subagent.LaunchFork.launch(...)`(或同等公共函数)
 - **AC18**:N6 配置开关 `enableSubAgentBackground:false` 时,Fork 路径调用 Agent 工具返回结构化错误
 - **AC19**:`<fork_boilerplate>` 出现在对话历史里 + Agent 工具被调用 → 拦截(QuerySource 失效兜底)
 - **AC20**:子 Agent throw → status=FAILED,主 Agent 收到 `<task-notification>` 含错误描述,主程序不崩
-- **AC21**:全新项目级自定义 Agent(`.mewcode/agents/<name>.md`)被 Catalog 加载;`subagent_type=<name>` 调用时,frontmatter 的 disallowedTools / permissionMode / maxTurns / systemPrompt 全部生效——子 Agent 看不到黑名单工具、按指定 mode 决策、不超 turns、按 systemPrompt 行事
-- **AC22**:Agent 定义 frontmatter 的非法字段(unknown model / unknown permissionMode)在加载时 stderr 警告并 fallback 到默认值(model→inherit, mode→default),mewcode 不阻断启动,该 Agent 仍可被 resolve 与调用
+- **AC21**:全新项目级自定义 Agent(`.cortex/agents/<name>.md`)被 Catalog 加载;`subagent_type=<name>` 调用时,frontmatter 的 disallowedTools / permissionMode / maxTurns / systemPrompt 全部生效——子 Agent 看不到黑名单工具、按指定 mode 决策、不超 turns、按 systemPrompt 行事
+- **AC22**:Agent 定义 frontmatter 的非法字段(unknown model / unknown permissionMode)在加载时 stderr 警告并 fallback 到默认值(model→inherit, mode→default),cortex 不阻断启动,该 Agent 仍可被 resolve 与调用

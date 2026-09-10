@@ -1,4 +1,4 @@
-# Hook 生命周期挂钩系统 Spec## 背景把可复用 SOP 搬出源码做成 Skill 包之后,MewCode 在"用户怎么扩展行为"这条路径上还差最后一环:**在 Agent 生命周期的固定时刻自动跑一段用户配置的动作**。当前的扩展点都是显式触发——Skill 要 `/<name>` 唤起、Slash 命令要用户手敲。如果想做这种"触发条件明确、动作固定"的重复事,只能每次手动来:
+# Hook 生命周期挂钩系统 Spec## 背景把可复用 SOP 搬出源码做成 Skill 包之后,Cortex 在"用户怎么扩展行为"这条路径上还差最后一环:**在 Agent 生命周期的固定时刻自动跑一段用户配置的动作**。当前的扩展点都是显式触发——Skill 要 `/<name>` 唤起、Slash 命令要用户手敲。如果想做这种"触发条件明确、动作固定"的重复事,只能每次手动来:
 
 - 写完文件想立刻 `mvn spotless:apply`,得手动跑或写监听脚本
 - 想阻止 Agent 跑 `rm -rf` 之类的命令,权限规则要逐个加 deny
@@ -27,11 +27,11 @@ ch08 的权限引擎覆盖了"该不该允许工具调用",但**只在工具调�
   - `Bash(value)` 不带前缀沿用 glob 语义
 - **F3**:精确匹配做整串相等比较;glob 沿用现有 wildcard / matchPath 实现;正则在加载期编译并缓存,编译失败按 F4 处理;反向是"任意其它类型的取反包装",支持嵌套(如 `Bash(!=value)`)
 - **F4**:扩展后权限引擎的 Allow/Deny 判定语义不变,但规则解析失败原本静默跳过,现在改为"stderr 打印失败规则与原因、其余规则正常加载"
-- **F5**:现有 ch08 的所有权限测试、既有的 `.mewcode/permissions.yaml` 用户配置(仅写 `Bash(git *)` 这种)必须继续工作,不破坏向后兼容
+- **F5**:现有 ch08 的所有权限测试、既有的 `.cortex/permissions.yaml` 用户配置(仅写 `Bash(git *)` 这种)必须继续工作,不破坏向后兼容
 
 ### Hook 配置文件- **F6**:YAML 配置文件位置按以下顺序扫描,找到就加载、找不到就跳过:
-  - 项目级:`<projectRoot>/.mewcode/hooks.yaml`
-  - 用户级:`~/.mewcode/hooks.yaml`
+  - 项目级:`<projectRoot>/.cortex/hooks.yaml`
+  - 用户级:`~/.cortex/hooks.yaml`
 - **F7**:两层规则**叠加合并**——所有规则共同参与事件分派;不存在"覆盖同名"概念,hook 的 name 仅用于日志和 only_once 跟踪;两层中出现同名 hook 时,加载期 stderr 提示冲突并跳过后到者
 - **F8**:YAML 顶层结构:`hooks:` 数组,每条 hook 为对象,字段如下:
   - `name`(必填):字符串,用于日志、only_once 跟踪、冲突检测
@@ -43,7 +43,7 @@ ch08 的权限引擎覆盖了"该不该允许工具调用",但**只在工具调�
   - `timeout`(可选时长字符串如 `30s`,默认 30s):命令 / HTTP 最大执行时长
 
 ### 生命周期事件- **F9**:11 个事件名及触发时机:
-  - **SessionStart**:mewcode 启动初次进入会话或 `/clear` 新建会话后、env context 装配完毕、首条 user 消息进入对话历史**之前**
+  - **SessionStart**:cortex 启动初次进入会话或 `/clear` 新建会话后、env context 装配完毕、首条 user 消息进入对话历史**之前**
   - **SessionEnd**:进程关闭前、`/clear` 关闭旧会话前、`/resume` 切换离开旧会话前
   - **SessionResume**:`/resume` 选中历史会话、恢复完成、首条 user 消息进入**之前**
   - **UserPromptSubmit**:TUI 提交一条非 Slash 命令的 user 消息、写入对话历史**之前**——可拦截
@@ -137,7 +137,7 @@ ch08 的权限引擎覆盖了"该不该允许工具调用",但**只在工具调�
 ### Slash 命令- **F34**:新增内置 Slash 命令 `/hooks`,KindLocal,零参数:输出当前已加载的所有 hook 的精简列表,按 `event` 分组、每条一行 `  <name>  <event>  <action.type>  <flags>`,flags 含 `[once]` / `[async]` 标志;末尾追加 `Loaded from: <加载来源文件列表>`
 - **F35**:无任何 hook 时输出 `No hooks loaded.`
 
-## 非功能需求- **N1**:Hook 加载在进程启动期一次性完成;YAML 解析错误、字段缺失、event 未知、name 冲突、async + 拦截事件冲突、regex 编译失败等所有加载错误**一律 stderr 输出后继续启动**,不阻断 mewcode 进程
+## 非功能需求- **N1**:Hook 加载在进程启动期一次性完成;YAML 解析错误、字段缺失、event 未知、name 冲突、async + 拦截事件冲突、regex 编译失败等所有加载错误**一律 stderr 输出后继续启动**,不阻断 cortex 进程
 - **N2**:事件分派接口必须支持取消信号——拦截事件下同步等待、async 后台执行中线程中断都应及时退出,避免卡死 Agent.run
 - **N3**:拦截事件下的同步 hook 串行执行,以单条 hook 的 timeout 累加;命令自身超时按 F18 处理,不再设全局上限
 - **N4**:注入的 reminder 文本不入序列化对话历史、不参与 token 估算的"历史增长部分"(与 plan reminder 同语义)
@@ -145,7 +145,7 @@ ch08 的权限引擎覆盖了"该不该允许工具调用",但**只在工具调�
 - **N6**:Hook payload JSON 序列化必须稳定字段顺序——key 按字母序,方便用户脚本对 JSON 直接 `grep`
 - **N7**:扩展后的匹配器对权限规则与 Hook 条件共用同一实现,单元测试覆盖四种 type × 边界条件(空串、转义、嵌套 not、空 path)
 - **N8**:subagent 占位日志输出固定格式 `[hook subagent] not yet implemented, skipped: <name>`,方便后续章节对接时文本搜索替换
-- **N9**:hooks.yaml 文件不存在不报错;文件存在但整体 YAML 解析失败、顶层结构非法时打 stderr 但保持 mewcode 启动
+- **N9**:hooks.yaml 文件不存在不报错;文件存在但整体 YAML 解析失败、顶层结构非法时打 stderr 但保持 cortex 启动
 - **N10**:HTTP 动作的请求体模板渲染失败按 hook 失败处理;模板默认只支持 `${field}` / `${nested.path}` 最基本字段访问,不开放函数调用
 
 ## 不做的事
@@ -153,21 +153,21 @@ ch08 的权限引擎覆盖了"该不该允许工具调用",但**只在工具调�
 - 不实现 subagent 动作的真实执行(仅占位日志),等后续章节对接 SubAgent 系统
 - 不做 only_once 标记的跨进程持久化(重启进程后集合清空,hook 会重新触发一次)
 - 不引入 hook 执行的显式优先级 / order 字段——加载层按 yaml 声明顺序自然有序
-- 不做 hook 文件的热更新——加载在启动期一次完成,编辑文件后需重启 mewcode 才生效
+- 不做 hook 文件的热更新——加载在启动期一次完成,编辑文件后需重启 cortex 才生效
 - 不在 TUI 渲染 hook 触发的可视化轨迹(仅 stderr 日志)
 - 不实现 hook 之间的依赖 / 互斥关系
 - 不为 hook 提供独立日志文件、专属环境变量配置入口
 - 不做 hook 失败的重试机制
 - 不支持 hook 配置文件的 @include 或继承
 
-## 验收标准- **AC1**:写一份只含 `Bash(=git status)` 的精确规则到 `.mewcode/permissions.yaml`,启动后调用 `git status` 被该规则命中、调用 `git status -s` 不命中
+## 验收标准- **AC1**:写一份只含 `Bash(=git status)` 的精确规则到 `.cortex/permissions.yaml`,启动后调用 `git status` 被该规则命中、调用 `git status -s` 不命中
 - **AC2**:写一份 `Bash(~^npm (install|test)$)` 的正则规则,启动后调用 `npm install` 命中、`npm run dev` 不命中;写法非法(如未闭合括号、正则编译失败)启动期 stderr 打印 `rule "Bash(~..." parse failed: ...` 并跳过该条规则
 - **AC3**:写一份 `Bash(!~^rm)` 的反向正则规则,调用 `rm -rf .` 不命中(以 rm 起头)、调用 `ls -lh` 命中(不以 rm 起头)
-- **AC4**:在 `<projectRoot>/.mewcode/hooks.yaml` 写一条 PreToolUse hook——条件 `tool_name = write_file`,动作 `shell: "echo blocked >&2; exit 2"`;启动后 LLM 调用 write_file 工具时被拦截,tool_result 显示 `[hook <name>] blocked`,文件未被写入
+- **AC4**:在 `<projectRoot>/.cortex/hooks.yaml` 写一条 PreToolUse hook——条件 `tool_name = write_file`,动作 `shell: "echo blocked >&2; exit 2"`;启动后 LLM 调用 write_file 工具时被拦截,tool_result 显示 `[hook <name>] blocked`,文件未被写入
 - **AC5**:上面 AC4 的 hook 把动作命令改成 `exit 0`,再调用 write_file,hook 触发但放行,文件成功写入
-- **AC6**:写一条 SessionStart hook——动作 `prompt: "用 zh-CN 回复"`;重启 mewcode 后首轮对话中 LLM reminder 区能看到该文本(通过调试通道观察),后续轮不再注入
+- **AC6**:写一条 SessionStart hook——动作 `prompt: "用 zh-CN 回复"`;重启 cortex 后首轮对话中 LLM reminder 区能看到该文本(通过调试通道观察),后续轮不再注入
 - **AC7**:写一条 PostToolUse hook——条件工具名为 write_file 且 `is_error=false`,动作 `shell: "mvn -q spotless:apply -DspotlessFiles=\"$(jq -r .tool_input.path)\""`、async=true、timeout=5s;LLM 写一个 Java 文件后 spotless 异步在后台执行,主对话流不暂停;命令失败时 stderr 打印失败日志、Agent 不中断
-- **AC8**:写一条 async + PreToolUse 的 hook,启动 mewcode 时 stderr 打印 `hook "<name>": async not allowed for blocking events, skipped` 并跳过该条
+- **AC8**:写一条 async + PreToolUse 的 hook,启动 cortex 时 stderr 打印 `hook "<name>": async not allowed for blocking events, skipped` 并跳过该条
 - **AC9**:写一条 only_once + PreUserMessage 的 hook,动作 `shell: "echo first-turn >&2"`;第一轮 PreUserMessage 时 stderr 出现 `first-turn`,后续轮不再出现;执行 `/clear` 进入新会话后下一轮再次出现 `first-turn`
 - **AC10**:写一条 UserPromptSubmit hook——条件 prompt 正则匹配 `(?i)delete`,动作 `shell: "echo \"prompt contains delete keyword\" >&2; exit 2"`;用户在 TUI 输入"请帮我 delete 那个文件"时被拦截,输入框下方提示 `[hook <name>] prompt contains delete keyword`,消息未进入对话历史
 - **AC11**:在 hooks.yaml 中写 `event: UnknownEvent`,启动后 stderr 打印 `hook "<name>": unknown event "UnknownEvent", skipped`,其余 hook 正常加载
@@ -176,4 +176,4 @@ ch08 的权限引擎覆盖了"该不该允许工具调用",但**只在工具调�
 - **AC14**:写一条 PreToolUse hook——动作 `http: POST http://localhost:9999/check`;本地 server 对 Bash 工具返回 `{"decision":"block","reason":"network policy"}`,Bash 调用被拦截、其它工具不受影响
 - **AC15**:写一条 SessionStart hook——动作 `subagent: agent_name=foo, prompt=test`;启动后 stderr 出现 `[hook subagent] not yet implemented, skipped: <name>`,Agent 主流程不受影响
 - **AC16**:在 hook 的 `if` 中同时写 `all_of` 与 `any_of` 两个键,启动 stderr 报错跳过该条,其余 hook 加载正常
-- **AC17**:tmux 内启动 mewcode,按 AC4 → AC6 → AC7 → AC10 顺序触发,整个过程不卡顿、无 panic(端到端见 checklist)
+- **AC17**:tmux 内启动 cortex,按 AC4 → AC6 → AC7 → AC10 顺序触发,整个过程不卡顿、无 panic(端到端见 checklist)

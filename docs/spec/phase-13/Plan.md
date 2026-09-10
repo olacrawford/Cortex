@@ -2,19 +2,19 @@
 
 ## 架构概览
 
-新建 `com.mewcode.worktree` 包,集中放 `WorktreeManager`、`Worktree`、`WorktreeSession`、Slug 校验、创建后设置、自动清理、过期清理。其余包按以下方式接入:
+新建 `com.cortex.worktree` 包,集中放 `WorktreeManager`、`Worktree`、`WorktreeSession`、Slug 校验、创建后设置、自动清理、过期清理。其余包按以下方式接入:
 
-- **`com.mewcode.tool`**:新增 ``(`withCwd` / `cwd()` / `resolvePath(...)`);改造 6 个核心工具用 `ctx.resolvePath(...)`
-- **`com.mewcode.subagent`**:`Definition` 加 `isolation` 字段,`Parser` 解析 `isolation:` frontmatter
-- **`com.mewcode.agent`**:`AgentTool#execute` 加 `executeWithWorktree` 分支,启动时通过 ctx 注入 cwd
-- **`com.mewcode.command`**:新增 `WorktreeCommand` 内置命令,提供 `/worktree` 一级命令与子命令(create/list/enter/exit/remove)
-- **`com.mewcode.tui`**:在 `MewCodeModel` 字段加 `WorktreeManager worktreeMgr`、`Path activeCwd`;主 Agent 每次 `run` 前用 `ctx.withCwd(activeCwd)` 注入 ctx
-- **`com.mewcode.MewCode`**:`new WorktreeManager(root)` 落在 `subagentCatalog = SubagentCatalog.load(root)` 之后;失败降级为 null(可选);把 manager 传给 `MewCodeModel` 和 `AgentTool` 构造
-- **`.gitignore`**:追加 `.mewcode/worktrees/` 与 `.mewcode/worktree_session.json`
+- **`com.cortex.tool`**:新增 ``(`withCwd` / `cwd()` / `resolvePath(...)`);改造 6 个核心工具用 `ctx.resolvePath(...)`
+- **`com.cortex.subagent`**:`Definition` 加 `isolation` 字段,`Parser` 解析 `isolation:` frontmatter
+- **`com.cortex.agent`**:`AgentTool#execute` 加 `executeWithWorktree` 分支,启动时通过 ctx 注入 cwd
+- **`com.cortex.command`**:新增 `WorktreeCommand` 内置命令,提供 `/worktree` 一级命令与子命令(create/list/enter/exit/remove)
+- **`com.cortex.tui`**:在 `CortexModel` 字段加 `WorktreeManager worktreeMgr`、`Path activeCwd`;主 Agent 每次 `run` 前用 `ctx.withCwd(activeCwd)` 注入 ctx
+- **`com.cortex.Cortex`**:`new WorktreeManager(root)` 落在 `subagentCatalog = SubagentCatalog.load(root)` 之后;失败降级为 null(可选);把 manager 传给 `CortexModel` 和 `AgentTool` 构造
+- **`.gitignore`**:追加 `.cortex/worktrees/` 与 `.cortex/worktree_session.json`
 
 ## 核心数据结构
 
-### `com.mewcode.worktree.Worktree`
+### `com.cortex.worktree.Worktree`
 
 ```java
 public record Worktree(
@@ -28,7 +28,7 @@ public record Worktree(
 ) {}
 ```
 
-### `com.mewcode.worktree.WorktreeSession`
+### `com.cortex.worktree.WorktreeSession`
 
 ```java
 public record WorktreeSession(
@@ -42,7 +42,7 @@ public record WorktreeSession(
 ) {}
 ```
 
-### `com.mewcode.worktree.WorktreeManager`
+### `com.cortex.worktree.WorktreeManager`
 
 ```java
 public final class WorktreeManager {
@@ -69,7 +69,7 @@ public final class WorktreeManager {
 }
 ```
 
-### `com.mewcode.worktree` 辅助类型
+### `com.cortex.worktree` 辅助类型
 
 ```java
 public enum ExitAction { KEEP, REMOVE }
@@ -85,7 +85,7 @@ public final class WorktreeHasChangesException extends IOException {
 }
 ```
 
-### `com.mewcode.tool.`
+### `com.cortex.tool.`
 
 ```java
 public record (Optional<Path> cwd /* 其他既有 ctx 字段也合并到这里 */) {
@@ -103,7 +103,7 @@ public record (Optional<Path> cwd /* 其他既有 ctx 字段也合并到这里 *
 }
 ```
 
-### `com.mewcode.subagent.Definition` 扩展
+### `com.cortex.subagent.Definition` 扩展
 
 ```java
 public record Definition(
@@ -114,7 +114,7 @@ public record Definition(
 
 ## 模块设计
 
-### `com.mewcode.worktree`(新包)
+### `com.cortex.worktree`(新包)
 
 **职责:** Worktree 完整生命周期管理 + Slug 校验 + 后台清理。
 **对外接口:** `WorktreeManager` (含上面所列方法) + `WorktreeSlug.validate(...)` + `WorktreeHasChangesException` 等导出类型。
@@ -144,7 +144,7 @@ public record Definition(
 - `Worktree.java` / `WorktreeHasChangesException.java` / `ExitAction.java` / `ExitOptions.java` / `ExitReport.java` / `AutoCleanupReport.java`
 - `*Test.java` — JUnit 5 单测
 
-### `com.mewcode.tool` 改造
+### `com.cortex.tool` 改造
 
 **职责:** 增加 ctx cwd 传递机制,改造 6 个工具用 `ctx.resolvePath` / `ProcessBuilder.directory()`。
 **对外接口:** ``(`withCwd` / `cwd()` / `resolvePath`)新增;6 个工具 `execute` 行为变更但 schema 不变。
@@ -156,14 +156,14 @@ public record Definition(
 - `GrepTool.java` — 同 `GlobTool`
 - `BashTool.java` — `pb.directory(ctx.resolvePath("").toFile())` (即 cwd 本身,空字符串绝对路径化)
 
-### `com.mewcode.subagent` 改造
+### `com.cortex.subagent` 改造
 
 **职责:** `Definition` 加 `isolation` 字段;`Parser` 解析。
 **改动:**
 - `Parser.java` — frontmatter Map 增加 `isolation` 字段提取,合法值 `""` / `"worktree"`,其他值 stderr 警告回落空
 - `Definition.java` — record 加 `String isolation`(放参数末尾)
 
-### `com.mewcode.agent` 改造
+### `com.cortex.agent` 改造
 
 **职责:** `AgentTool` 增加 worktree 分支,接受 manager。
 **改动:**
@@ -176,7 +176,7 @@ public record Definition(
   - `buildWorktreeNotice(parentCwd, wtPath)` 文案
   - `randomAgentName()` 委托 `WorktreeNaming.randomAgentName()`
 
-### `com.mewcode.command` 新增
+### `com.cortex.command` 新增
 
 **职责:** `/worktree` 一级命令 + 子命令解析。
 **改动:**
@@ -206,17 +206,17 @@ public interface Ui {
 }
 ```
 
-### `com.mewcode.tui` 改造
+### `com.cortex.tui` 改造
 
 **职责:** 持有 manager 引用,把 activeCwd 注入主 Agent ctx。
 **改动:**
-- `MewCodeModel.java` 字段加 `WorktreeManager worktreeMgr`、`Path activeCwd`(null 表示 JVM 当前目录)
-- 构造器接收 `WorktreeManager worktreeMgr`(`MewCodeModel.Builder` 加方法)
+- `CortexModel.java` 字段加 `WorktreeManager worktreeMgr`、`Path activeCwd`(null 表示 JVM 当前目录)
+- 构造器接收 `WorktreeManager worktreeMgr`(`CortexModel.Builder` 加方法)
 - 在主 Agent `run` 入口前注入 `ctx = ctx.withCwd(effectiveCwd())`,其中 `effectiveCwd()` 返回 `activeCwd` 或 `Path.of("").toAbsolutePath()`
-- 实现 `WorktreeAccessor` 接口的适配器类 `TuiWorktreeAccessor`(内部持 `MewCodeModel` + `WorktreeManager`)
+- 实现 `WorktreeAccessor` 接口的适配器类 `TuiWorktreeAccessor`(内部持 `CortexModel` + `WorktreeManager`)
 - 启动时若 manager 的 `currentSession()` 非 null,把 `activeCwd = Path.of(session.worktreePath())`
 
-### `com.mewcode.MewCode` 改造
+### `com.cortex.Cortex` 改造
 
 ```java
 // 紧跟 var subagentCatalog = SubagentCatalog.load(root); 之后
@@ -231,7 +231,7 @@ try {
 
 var agentTool = new AgentTool(subagentCatalog, taskMgr, null, cfg.effectiveEnableSubAgentBackground(), worktreeMgr);
 
-var tui = new MewCodeModel(
+var tui = new CortexModel(
         // ... 既有字段 ...
         .worktreeMgr(worktreeMgr)
         .build();
@@ -280,7 +280,7 @@ Files.readAllBytes(abs)
 **TUI 主 Agent Run 入口:**
 
 ```
-MewCodeModel.runOnce(ctx):
+CortexModel.runOnce(ctx):
   if (activeCwd != null) {
       ctx = ctx.withCwd(activeCwd);
   }
@@ -290,7 +290,7 @@ MewCodeModel.runOnce(ctx):
 ## 文件组织
 
 ```
-src/main/java/com/mewcode/worktree/   — 新包
+src/main/java/com/cortex/worktree/   — 新包
 ├── WorktreeManager.java              — Manager 类型 + 构造
 ├── WorktreeCreate.java               — create + 快速恢复 + post-creation setup
 ├── WorktreeLifecycle.java            — enter / exit / remove / autoCleanup
@@ -305,7 +305,7 @@ src/main/java/com/mewcode/worktree/   — 新包
 ├── ExitAction.java / ExitOptions.java / ExitReport.java / AutoCleanupReport.java
 └── WorktreeHasChangesException.java
 
-src/test/java/dev/mewcode/worktree/
+src/test/java/dev/cortex/worktree/
 ├── WorktreeSlugTest.java
 ├── WorktreeManagerTest.java
 ├── WorktreeCreateTest.java
@@ -313,7 +313,7 @@ src/test/java/dev/mewcode/worktree/
 ├── WorktreeSweepTest.java
 └── GitHelperTest.java
 
-src/main/java/com/mewcode/tool/
+src/main/java/com/cortex/tool/
 ├── BashTool.java                     — 改造:pb.directory(ctx.resolvePath("").toFile())
 ├── ReadFileTool.java                 — 改造:用 ctx.resolvePath
 ├── WriteFileTool.java                — 改造:用 ctx.resolvePath
@@ -321,34 +321,34 @@ src/main/java/com/mewcode/tool/
 ├── GlobTool.java                     — 改造:用 ctx.resolvePath
 └── GrepTool.java                     — 改造:用 ctx.resolvePath
 
-src/test/java/dev/mewcode/tool/
+src/test/java/dev/cortex/tool/
 └── Test.java
 
-src/main/java/com/mewcode/subagent/
+src/main/java/com/cortex/subagent/
 ├── Definition.java                   — 加 isolation 字段
 └── Parser.java                       — 解析 isolation:
 
-src/test/java/dev/mewcode/subagent/
+src/test/java/dev/cortex/subagent/
 └── ParserTest.java                   — 增加 isolation 用例
 
-src/main/java/com/mewcode/agent/
+src/main/java/com/cortex/agent/
 ├── AgentTool.java                    — execute 加 isolation 分支
 └── AgentWorktreeRunner.java          — 新增:executeWithWorktree + notice
 
-src/test/java/dev/mewcode/agent/
+src/test/java/dev/cortex/agent/
 └── AgentWorktreeRunnerTest.java
 
-src/main/java/com/mewcode/command/
+src/main/java/com/cortex/command/
 ├── WorktreeCommand.java              — 新增:/worktree handler
 ├── Builtins.java                     — 增加 register
 ├── Ui.java                           — 加 worktreeAccessor()
 └── WorktreeAccessor.java             — 接口 + WorktreeSummary
 
-src/main/java/com/mewcode/tui/
-├── MewCodeModel.java                       — 加 worktreeMgr / activeCwd / cwd 注入
+src/main/java/com/cortex/tui/
+├── CortexModel.java                       — 加 worktreeMgr / activeCwd / cwd 注入
 └── TuiWorktreeAccessor.java          — 实现 WorktreeAccessor(适配 WorktreeManager)
 
-src/main/java/com/mewcode/MewCode.java   — 接入
+src/main/java/com/cortex/Cortex.java   — 接入
 
 .gitignore                            — 追加两行
 ```
@@ -358,15 +358,15 @@ src/main/java/com/mewcode/MewCode.java   — 接入
 | 决策点 | 选择 | 理由 |
 |--------|------|------|
 | cwd 传递方式 | `` record 携带 `Optional<Path>` | JVM 没有 per-thread cwd,显式上下文最干净;Tool 接口签名不变,prompt cache 不抖动 |
-| Worktree 目录位置 | `.mewcode/worktrees/<flatSlug>/` | README 既定方案;仓库内 + .gitignore 不追踪 |
+| Worktree 目录位置 | `.cortex/worktrees/<flatSlug>/` | README 既定方案;仓库内 + .gitignore 不追踪 |
 | 嵌套 slug `/` 处理 | 替换为 `+`(flatten)做文件系统/分支名 | Git 分支的 `/` 是命名空间分隔符,会导致 `worktree-team/alice` 与 `worktree-team` 的 D/F 冲突 |
-| Manager 构造失败处理 | 抛 `IOException`,Main 降级 `worktreeMgr=null` | 不阻塞 mewcode 启动;后续 isolation:worktree 调用回错误信息 |
+| Manager 构造失败处理 | 抛 `IOException`,Main 降级 `worktreeMgr=null` | 不阻塞 cortex 启动;后续 isolation:worktree 调用回错误信息 |
 | 快速恢复 | 纯 fs 读,不调 git | README 说明大仓库 git fetch 6-8s,fs read 3ms;场景:同一 SubAgent 反复进同 worktree |
 | 创建后设置失败处理 | 仅 stderr 警告 | 都是 best-effort,失败 ≠ 不可用 |
 | `-B` vs `-b` | `-B`(重置) | 上次残留的孤儿分支不会让 create 失败 |
 | `Thread.sleep(100)` 在 remove | 保留 | README 指出 git lockfile 竞态;100ms 是经验值 |
 | 进程 cwd 处理 | 不使用进程级 chdir,全部 explicit cwd | JVM 标准 API 不支持 chdir;`ProcessBuilder.directory()` 已能解决子进程 cwd,避免进程级 cwd 成为同步点 |
-| 后台清理触发时机 | mewcode 启动时跑一次,虚拟线程异步 | 不阻塞主流程;ch11 已有 `SessionStore.cleanExpired` 同样做法 |
+| 后台清理触发时机 | cortex 启动时跑一次,虚拟线程异步 | 不阻塞主流程;ch11 已有 `SessionStore.cleanExpired` 同样做法 |
 | `.worktreeinclude` 缺失行为 | 跳过 D 步骤,不报错 | 大多数项目没这文件 |
 | `subagent.isolation` 默认值 | `""`(无隔离) | 不破坏 ch13 既有定义文件 |
 | 临时 worktree 命名 | `agent-a<7hex>` | README 既定;`sweepStale` 正则匹配 |

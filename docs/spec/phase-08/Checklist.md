@@ -1,5 +1,7 @@
 # 项目记忆与会话持久化 Checklist
 
+> **状态说明**：本阶段功能已全部实现，并通过全量单元测试与后续阶段的 tmux E2E 复验；本清单勾选状态未随开发维护，未勾选不代表未实现。
+
 > 每一项通过运行代码或观察行为来验证，聚焦系统行为。
 
 ## 编译与测试
@@ -11,7 +13,7 @@
 
 ## 项目指令文件
 
-- [ ] 三层加载优先级：在三个路径各放不同内容的 MEWCODE.md，启动进程，检查系统提示 custom-instructions 模块中三份内容按项目根 → .mewcode/ → ~/.mewcode/ 顺序排列（验证：打断点或加日志观察 `Prompt.buildSystemPrompt` 输出）
+- [ ] 三层加载优先级：在三个路径各放不同内容的 MEWCODE.md，启动进程，检查系统提示 custom-instructions 模块中三份内容按项目根 → .cortex/ → ~/.cortex/ 顺序排列（验证：打断点或加日志观察 `Prompt.buildSystemPrompt` 输出）
 - [ ] 缺失文件静默：只在项目根放 MEWCODE.md → 加载成功，不报错（验证：启动无错误日志）
 - [ ] @include 正常展开：MEWCODE.md 中写 `@include sub/rules.md`，`sub/rules.md` 存在且有内容 → 内容替换 @include 行（验证：系统提示中出现 rules.md 的内容）
 - [ ] @include 嵌套展开：A include B，B include C → A 的输出中包含 C 的内容
@@ -23,7 +25,7 @@
 
 ## 会话存档
 
-- [ ] Session ID 新格式：启动进程，检查 `.mewcode/sessions/` 下目录名形如 `YYYYMMDD-HHMMSS-xxxx`（验证：`ls .mewcode/sessions/`，正则匹配 `\d{8}-\d{6}-[0-9a-f]{4}`）
+- [ ] Session ID 新格式：启动进程，检查 `.cortex/sessions/` 下目录名形如 `YYYYMMDD-HHMMSS-xxxx`（验证：`ls .cortex/sessions/`，正则匹配 `\d{8}-\d{6}-[0-9a-f]{4}`）
 - [ ] JSONL 首行带 model：发送第一条消息后，读 `conversation.jsonl` 第一行 → 包含 `"model":"<模型名>"` 字段（验证：`head -1 conversation.jsonl | jq .model`）
 - [ ] 消息实时追加：发送 "hello" 并等回复 → JSONL 至少两行（user + assistant），每行有 role、content、ts（验证：`wc -l conversation.jsonl` 且 `jq .role` 每行有值）
 - [ ] 工具调用记录：触发一次工具调用（如读文件）→ JSONL 中出现 `tool_calls` 和 `tool_results` 字段（验证：`grep tool_calls conversation.jsonl`）
@@ -48,16 +50,16 @@
 
 ## 会话清理
 
-- [ ] 过期清理：手动创建时间戳为 31 天前的 session 目录 → 启动进程后被删除（验证：`ls .mewcode/sessions/` 不含该目录）
+- [ ] 过期清理：手动创建时间戳为 31 天前的 session 目录 → 启动进程后被删除（验证：`ls .cortex/sessions/` 不含该目录）
 - [ ] 新会话不被清理：刚创建的 session 目录 → 启动后保留（验证：目录仍存在）
 - [ ] 旧格式保留：旧格式 ID 目录 → 启动后不被删除（验证：目录仍存在）
 - [ ] 清理不阻塞启动：清理在 virtual thread 后台执行 → 启动流程不等待清理完成（验证：即使有大量过期目录，启动仍秒级完成）
 
 ## 自动笔记
 
-- [ ] 显式记忆触发：对话中说"记住 xxx" → Agent 回复后，memory 目录出现新 .md 文件（验证：`ls .mewcode/memory/` 或 `~/.mewcode/memory/`）
+- [ ] 显式记忆触发：对话中说"记住 xxx" → Agent 回复后，memory 目录出现新 .md 文件（验证：`ls .cortex/memory/` 或 `~/.cortex/memory/`）
 - [ ] 每 5 轮自动触发：连续对话 5 轮后检查 memory 目录是否有新增（验证：对比前后 MEMORY.md）
-- [ ] 项目级分类：说"记住这个项目用中文" → 笔记出现在 `.mewcode/memory/`（项目级），type 为 `project_knowledge`（验证：`ls .mewcode/memory/`）
+- [ ] 项目级分类：说"记住这个项目用中文" → 笔记出现在 `.cortex/memory/`（项目级），type 为 `project_knowledge`（验证：`ls .cortex/memory/`）
 - [ ] 索引更新：创建笔记后 → MEMORY.md 中有该笔记摘要行（验证：`cat MEMORY.md`）
 - [ ] 记忆注入系统提示：MEMORY.md 有内容 → 系统提示 long-term-memory 模块包含索引（验证：打断点或日志观察）
 - [ ] 异步不阻塞：记忆更新执行中发送下一条消息 → 消息立即被处理（验证：无感知延迟）
@@ -76,15 +78,15 @@
 
 ## 端到端场景（tmux 实跑）
 
-- [ ] 场景 1（首次冷启动）：删掉 MEWCODE.md、`.mewcode/memory/`、`~/.mewcode/memory/`，启动 mewcode；banner 正常显示；输入 "你好" → 模型回复正常；`cat .mewcode/sessions/*/conversation.jsonl` 可见至少两行（user + assistant），每行 `jq .` 能解析；第一行含 `"model"` 字段；退出后 session 目录保留不删。(AC7/AC8/AC27)
-- [ ] 场景 2（项目指令生效）：在项目根创建 `MEWCODE.md` 写入 "所有回复必须以「喵~」开头"；启动 mewcode → 输入 "你好" → 模型回复以"喵~"开头（验证指令注入生效）。再在 `~/.mewcode/MEWCODE.md` 写入 "回复使用英文"，重启 → 输入 "你好" → 模型以"喵~"开头但用中文（项目级优先级压过用户级）。(AC1/AC2)
-- [ ] 场景 3（@include 展开）：项目根 `MEWCODE.md` 写 `@include .mewcode/rules/style.md`；创建 `.mewcode/rules/style.md` 写入 "代码块必须带语言标记"；启动 → 输入 "写一个 hello world" → 模型输出的代码块带语言标记。(AC3)
-- [ ] 场景 4（会话存档 + 工具记录）：启动 → 输入 "读取 build.gradle.kts" → 模型调 read_file → 回复内容；`cat .mewcode/sessions/*/conversation.jsonl` 至少 4 行（user → assistant+tool_calls → tool_results → assistant）；`grep tool_calls` 和 `grep tool_results` 各至少一条命中。(AC8/AC9)
-- [ ] 场景 5（/resume 完整流程）：启动 session A → 输入 "记住：我在写一个电商系统" → 模型回复 → `/exit` 退出；重新启动（新 session B）→ 输入 `/resume` → 列表中出现 session A（标题含"记住"或"电商"）→ 上下键选中 → Enter → TUI 显示"已恢复会话"系统消息 → 输入 "上次说到哪了" → 模型能引用之前的对话内容；`wc -l .mewcode/sessions/<A_id>/conversation.jsonl` 行数比恢复前多（恢复后新消息追加到旧 JSONL）。(AC11/AC12/AC13/AC18)
+- [ ] 场景 1（首次冷启动）：删掉 MEWCODE.md、`.cortex/memory/`、`~/.cortex/memory/`，启动 cortex；banner 正常显示；输入 "你好" → 模型回复正常；`cat .cortex/sessions/*/conversation.jsonl` 可见至少两行（user + assistant），每行 `jq .` 能解析；第一行含 `"model"` 字段；退出后 session 目录保留不删。(AC7/AC8/AC27)
+- [ ] 场景 2（项目指令生效）：在项目根创建 `MEWCODE.md` 写入 "所有回复必须以「喵~」开头"；启动 cortex → 输入 "你好" → 模型回复以"喵~"开头（验证指令注入生效）。再在 `~/.cortex/MEWCODE.md` 写入 "回复使用英文"，重启 → 输入 "你好" → 模型以"喵~"开头但用中文（项目级优先级压过用户级）。(AC1/AC2)
+- [ ] 场景 3（@include 展开）：项目根 `MEWCODE.md` 写 `@include .cortex/rules/style.md`；创建 `.cortex/rules/style.md` 写入 "代码块必须带语言标记"；启动 → 输入 "写一个 hello world" → 模型输出的代码块带语言标记。(AC3)
+- [ ] 场景 4（会话存档 + 工具记录）：启动 → 输入 "读取 build.gradle.kts" → 模型调 read_file → 回复内容；`cat .cortex/sessions/*/conversation.jsonl` 至少 4 行（user → assistant+tool_calls → tool_results → assistant）；`grep tool_calls` 和 `grep tool_results` 各至少一条命中。(AC8/AC9)
+- [ ] 场景 5（/resume 完整流程）：启动 session A → 输入 "记住：我在写一个电商系统" → 模型回复 → `/exit` 退出；重新启动（新 session B）→ 输入 `/resume` → 列表中出现 session A（标题含"记住"或"电商"）→ 上下键选中 → Enter → TUI 显示"已恢复会话"系统消息 → 输入 "上次说到哪了" → 模型能引用之前的对话内容；`wc -l .cortex/sessions/<A_id>/conversation.jsonl` 行数比恢复前多（恢复后新消息追加到旧 JSONL）。(AC11/AC12/AC13/AC18)
 - [ ] 场景 6（/resume 搜索过滤）：存在多个历史会话 → `/resume` → 输入搜索关键词（如某个会话标题中的词）→ 列表过滤到匹配项；按 Esc → 返回空闲态，当前会话不受影响。(AC13)
 - [ ] 场景 7（恢复坏行容错）：手动打开某个 JSONL，在中间插入一行 `{this is bad json`，保存；启动 → `/resume` → 选该会话 → 恢复成功，消息数 = 有效行数（跳过坏行）。(AC14)
 - [ ] 场景 8（崩溃恢复）：启动 → 对话 3-4 轮 → 记下 JSONL 行数 N → 另一个 tmux pane 执行 `kill -9 <pid>`；重新启动 → `/resume` → 选崩溃的会话 → JSONL 前 N 行完整可解析（最后一行可能不完整被跳过）→ 恢复后能继续对话。(AC10/AC14)
-- [ ] 场景 9（过期清理）：手动创建 `.mewcode/sessions/20260401-120000-dead/conversation.jsonl`（31 天前的时间戳）和一个旧格式目录 `1717000000-abc12345/`；启动 → `ls .mewcode/sessions/` → 31 天前的目录被删，旧格式目录保留，当前新 session 目录存在。(AC19/AC20)
-- [ ] 场景 10（记忆积累与注入）：启动 → 输入 "以后回复都用中文简体，不要用繁体" → 模型回复 → 等 2-3 秒（异步记忆更新）→ `ls .mewcode/memory/` 或 `~/.mewcode/memory/` 出现 .md 笔记文件；`cat */MEMORY.md` 有对应摘要行。退出 → 重新启动新会话 → 输入 "你好" → 确认模型回复为简体中文（记忆生效）。(AC21/AC22/AC23)
+- [ ] 场景 9（过期清理）：手动创建 `.cortex/sessions/20260401-120000-dead/conversation.jsonl`（31 天前的时间戳）和一个旧格式目录 `1717000000-abc12345/`；启动 → `ls .cortex/sessions/` → 31 天前的目录被删，旧格式目录保留，当前新 session 目录存在。(AC19/AC20)
+- [ ] 场景 10（记忆积累与注入）：启动 → 输入 "以后回复都用中文简体，不要用繁体" → 模型回复 → 等 2-3 秒（异步记忆更新）→ `ls .cortex/memory/` 或 `~/.cortex/memory/` 出现 .md 笔记文件；`cat */MEMORY.md` 有对应摘要行。退出 → 重新启动新会话 → 输入 "你好" → 确认模型回复为简体中文（记忆生效）。(AC21/AC22/AC23)
 - [ ] 场景 11（运行中不可 resume）：启动 → 输入一个需要较长时间的任务（如 "读取所有 Java 文件"）→ 在模型思考/工具执行期间输入 `/resume` → TUI 显示"请等待当前任务完成"提示，不进入列表。(AC29)
-- [ ] 场景 12（压缩后 JSONL 标记）：配置一个小 `contextWindow`（如 2000）→ 对话数轮触发自动压缩 → `grep '"type":"compact"' .mewcode/sessions/*/conversation.jsonl` 至少命中一次；`/exit` → 重启 → `/resume` 恢复该会话 → 消息数远小于 JSONL 总行数（从 compact 标记后加载）。(AC9/AC16)
+- [ ] 场景 12（压缩后 JSONL 标记）：配置一个小 `contextWindow`（如 2000）→ 对话数轮触发自动压缩 → `grep '"type":"compact"' .cortex/sessions/*/conversation.jsonl` 至少命中一次；`/exit` → 重启 → `/resume` 恢复该会话 → 消息数远小于 JSONL 总行数（从 compact 标记后加载）。(AC9/AC16)

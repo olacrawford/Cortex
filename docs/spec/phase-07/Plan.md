@@ -2,28 +2,28 @@
 
 ## 架构概览
 
-ch08 引入一个新的本地包 `com.mewcode.compact`,作为上下文管理的唯一权威入口。包内承担三块职责:
+ch08 引入一个新的本地包 `com.cortex.compact`,作为上下文管理的唯一权威入口。包内承担三块职责:
 
 1. **第 1 层预防性压缩**:在每一轮 LLM 请求发出之前,对 `ConversationManager` 中的工具结果做幂等的"超阈值落盘 + 字符串替换",并把替换决策冻结在一个会话级账本里,保证 prompt cache 前缀逐字节稳定。
 2. **第 2 层 LLM 摘要 + 恢复**:在估算 token 触达阈值(或被手动 / 紧急触发)时,调用 provider 跑一次结构化摘要请求,生成 9 部分摘要 + 三段恢复 + 近期原文,构造一个新的 `List<Message>` 替换掉旧的对话历史。
 3. **辅助子模块**:token 估算(锚定真实 usage + 字符增量)、最近读过文件的并发安全追踪、会话目录管理、PTL 自重试与熔断器。
 
-`com.mewcode.compact` 不直接持有 `Agent`,也不直接管理 `Provider`。它通过一组窄接口与外部模块交互:
+`com.cortex.compact` 不直接持有 `Agent`,也不直接管理 `Provider`。它通过一组窄接口与外部模块交互:
 
 | 外部模块 | 交互方向 | 形式 |
 |----------|----------|------|
-| `com.mewcode.agent` | Agent 调 compact | 主循环每轮请求前调 `manageContext`;ReadFile 成功后调 `RecoveryState.recordFile`;捕获 `PromptTooLongException` 后调 `forceCompact` 重试一次 |
-| `com.mewcode.conversation` | compact 改 conversation | compact 拿到 `List<Message>` 后做字符串替换 / 摘要重建,再用一个新方法 `replaceMessages` 整体替换内存数组 |
-| `com.mewcode.llm` | compact 调 provider | 摘要请求复用同一份 `Provider.stream`,但 `Request.tools` 留空;从 `StreamEvent` 尾部拿 usage 锚定 token 估算 |
-| `com.mewcode.tui` | TUI 调 compact | TUI 拿到以 `/` 开头的输入走命令分发;`/compact` 命令调 compact 的 `forceCompact` 并展示 token 变化系统消息 |
-| `com.mewcode.config` | config 喂 compact | `ProviderConfig` 新增 `contextWindow` 字段,未配置时按协议给默认值;compact 通过参数拿到当前 provider 的 contextWindow |
+| `com.cortex.agent` | Agent 调 compact | 主循环每轮请求前调 `manageContext`;ReadFile 成功后调 `RecoveryState.recordFile`;捕获 `PromptTooLongException` 后调 `forceCompact` 重试一次 |
+| `com.cortex.conversation` | compact 改 conversation | compact 拿到 `List<Message>` 后做字符串替换 / 摘要重建,再用一个新方法 `replaceMessages` 整体替换内存数组 |
+| `com.cortex.llm` | compact 调 provider | 摘要请求复用同一份 `Provider.stream`,但 `Request.tools` 留空;从 `StreamEvent` 尾部拿 usage 锚定 token 估算 |
+| `com.cortex.tui` | TUI 调 compact | TUI 拿到以 `/` 开头的输入走命令分发;`/compact` 命令调 compact 的 `forceCompact` 并展示 token 变化系统消息 |
+| `com.cortex.config` | config 喂 compact | `ProviderConfig` 新增 `contextWindow` 字段,未配置时按协议给默认值;compact 通过参数拿到当前 provider 的 contextWindow |
 
 **Agent 生命周期与状态归属调整**:现状的 TUI 在 `beginTurn` 里每轮 `Agent.builder().build().run(...)` 重新构造一次 Agent,意味着把 compact 的长生命周期状态(替换决策账本、文件追踪、自动摘要熔断计数、usageAnchor、本轮工具列表缓存)放成 Agent 字段会被每轮重置——决策冻结与熔断器立刻失效。
 
 本章引入 `SessionRuntime` 作为 TUI Model 跨 run 持有的长生命周期状态容器:
 
 ```java
-// com.mewcode.agent.SessionRuntime(新建)
+// com.cortex.agent.SessionRuntime(新建)
 public final class SessionRuntime {
     public final ContentReplacementState replacement;
     public final RecoveryState recovery;
@@ -46,15 +46,15 @@ public final class SessionRuntime {
 
 **依赖方向无环**:
 - `compact` 不依赖 `agent` / `config` / `tui`。
-- `config` 仅在 `effectiveContextWindow()` 中读自身常量(`DefaultAnthropicContextWindow` / `DefaultOpenAIContextWindow` 定义在 `com.mewcode.config.ProtocolDefaults`,不放 compact 包)。
+- `config` 仅在 `effectiveContextWindow()` 中读自身常量(`DefaultAnthropicContextWindow` / `DefaultOpenAIContextWindow` 定义在 `com.cortex.config.ProtocolDefaults`,不放 compact 包)。
 - `agent` 依赖 `compact` + `conversation` + `llm` + `tool` + `permission`,**不**依赖 `config`。
-- `MewCode` 是唯一同时引用 `config` 与 `agent` 的位置,负责把 `providerCfg.effectiveContextWindow()` 注入 SessionRuntime。
+- `Cortex` 是唯一同时引用 `config` 与 `agent` 的位置,负责把 `providerCfg.effectiveContextWindow()` 注入 SessionRuntime。
 - `tui` 持有 `SessionRuntime` 与 `Agent`(或在每轮构造 Agent 时把 runtime 传入)。
 
 ## 核心数据结构
 
 ```java
-// com.mewcode.compact.state — 决策账本、熔断器、文件追踪、会话上下文
+// com.cortex.compact.state — 决策账本、熔断器、文件追踪、会话上下文
 
 // ContentReplacementState 是会话级的"工具结果替换决策账本"。
 // seenIds 记录已经决策过的 toolUseId,无论决策是替换还是保留原文。
@@ -113,14 +113,14 @@ public record FileReadRecord(
 ) {}
 
 // SessionContext 是会话生命周期信息。sessionId 进程启动时一次性生成。
-// spillDir 是落盘目录,固定指向 .mewcode/sessions/<session_id>/tool-results/。
+// spillDir 是落盘目录,固定指向 .cortex/sessions/<session_id>/tool-results/。
 public record SessionContext(String sessionId, Path spillDir) {
     public static SessionContext create(Path workspace) throws IOException { ... }
 }
 ```
 
 ```java
-// com.mewcode.compact.CompactConstants — 全部硬编码常量
+// com.cortex.compact.CompactConstants — 全部硬编码常量
 
 public final class CompactConstants {
     public static final int    SINGLE_RESULT_LIMIT                    = 50000;   // 单条工具结果落盘阈值(字节)
@@ -144,7 +144,7 @@ public final class CompactConstants {
 ```
 
 ```java
-// com.mewcode.config.ProviderConfig 改动(仅追加字段,不动现有字段顺序)
+// com.cortex.config.ProviderConfig 改动(仅追加字段,不动现有字段顺序)
 
 public record ProviderConfig(
         String name,
@@ -167,7 +167,7 @@ public record ProviderConfig(
     }
 }
 
-// com.mewcode.config.ProtocolDefaults(新文件)
+// com.cortex.config.ProtocolDefaults(新文件)
 public final class ProtocolDefaults {
     public static final int DEFAULT_ANTHROPIC_CONTEXT_WINDOW = 200000;
     public static final int DEFAULT_OPENAI_CONTEXT_WINDOW    = 128000;
@@ -176,7 +176,7 @@ public final class ProtocolDefaults {
 }
 ```
 
-> **依赖方向说明**:协议默认值常量定义在 `com.mewcode.config.ProtocolDefaults`,由 `config` 自身使用;`compact` 包不持有协议默认值常量。`config` 与 `compact` 单向无环。
+> **依赖方向说明**:协议默认值常量定义在 `com.cortex.config.ProtocolDefaults`,由 `config` 自身使用;`compact` 包不持有协议默认值常量。`config` 与 `compact` 单向无环。
 
 ## 模块设计
 
@@ -238,7 +238,7 @@ public final class ContextCompactor {
 public final // Layer1 逻辑在 ContextCompactor 内部 {
 
     // offloadAndSnip 遍历 conv.messages(),针对每一条 RoleTool 消息上的 toolResults
-    // 列表做处理(mewcode 在 Conversation.addToolResults 把一轮工具结果挂在一条 RoleTool
+    // 列表做处理(cortex 在 Conversation.addToolResults 把一轮工具结果挂在一条 RoleTool
     // 消息上,工具结果不在 assistant 消息里)。规则:
     //   1. 已经在 replacement.seenIds 中的工具结果,通过 decideOnce 拿到现存决策结果
     //      (KEPT → 返回原文;REPLACED → 复用 replacements[id],**不重新构造** preview);
@@ -450,7 +450,7 @@ public final class Token {
 
 依赖:无。
 
-### Agent 主循环改造(`com.mewcode.agent.Agent`)
+### Agent 主循环改造(`com.cortex.agent.Agent`)
 
 Agent 通过 `SessionRuntime` 拿到所有长生命周期状态;Agent 自身只新增轻量字段:
 
@@ -468,7 +468,7 @@ public final class Agent {
     //       .engine(eng)
     //       .runtime(sessionRuntime)   // 新增,可选;不传则用默认空 runtime
     //       .build();
-    // 当不传 runtime 时构造一个空 runtime 让现有测试不爆,但本章的 mewcode / smoke 入口
+    // 当不传 runtime 时构造一个空 runtime 让现有测试不爆,但本章的 cortex / smoke 入口
     // 必须显式传入。
 }
 ```
@@ -477,7 +477,7 @@ public final class Agent {
 
 1. **本轮迭代开头**:按当前 `PermissionMode` 选 `defs = registry.getAllSchemas(protocol)` 或 `readOnlyDefinitions()`,把同一份 `defs` 列表同时作为 `// (参数直接传入 manage 方法).toolDefs` 和 `streamOnce` 的 `Request.tools`,保证恢复段宣称的工具与请求 tools 来自同一引用。`defs` 不缓存到 Agent 字段(避免 mode 切换时复用旧列表),但同一轮迭代内被 manageContext 与 streamOnce 共用。
 2. **每轮 streamOnce 之前**:构造 `// (参数直接传入 manage 方法)`:`usageAnchor = runtime.getUsageAnchor()`、`anchorMsgLen = runtime.getAnchorMsgLen()`、`estimatedToken = Token.estimateTokens(usageAnchor, conv.messages(), anchorMsgLen)`、`trigger = AUTO`。调 `ContextCompactor.manageContext`,错误走错误流程;manageContext 内部已经把消息列表写回 conversation。
-3. **streamOnce 签名扩展为抛 checked exception**:把现有 `StreamResult streamOnce(...)`(text / calls / usage / ok)改成 `StreamResult streamOnce(...) throws StreamException`,错误来源是 `AgentEvent.ErrorEvent`(mewcode 的 `Provider.stream` 接口返回 `BlockingQueue`,错误通过 `onError` 投递)。streamOnce 内部用 `CompletableFuture` 桥接订阅,在收到 Failed 时累加的 text 不写回 Conversation(保证 Conversation 状态与 Stream 调用前一致,紧急压缩可以安全地 replaceMessages)。
+3. **streamOnce 签名扩展为抛 checked exception**:把现有 `StreamResult streamOnce(...)`(text / calls / usage / ok)改成 `StreamResult streamOnce(...) throws StreamException`,错误来源是 `AgentEvent.ErrorEvent`(cortex 的 `Provider.stream` 接口返回 `BlockingQueue`,错误通过 `onError` 投递)。streamOnce 内部用 `CompletableFuture` 桥接订阅,在收到 Failed 时累加的 text 不写回 Conversation(保证 Conversation 状态与 Stream 调用前一致,紧急压缩可以安全地 replaceMessages)。
 4. **Stream 完成后**(仅主对话路径):从尾事件中读 `usage`,调 `Token.usageAnchor(usage)` 更新 `runtime.usageAnchor`,同时 `runtime.anchorMsgLen = conv.size()`。摘要请求结束后**不**更新这两个字段。
 5. **ReadFile 工具调用成功后**:在 `executeBatched` 内、工具 worker virtual thread 内同步执行:检测 `toolName.equals("ReadFile")` 且 `tool.Result.isError() == false`(注意 isError 来自 `tool.Result`,不是 `llm.ToolResult`),把 `ToolCall.input`(`JsonNode`)反序列化成 `Map<String, Object>`,取出 `path` 字段(与 `tool/ReadFileTool` 定义的参数名一致),`Path.of(path).toAbsolutePath().normalize()` 后用 `Files.readString(absPath)` 拿纯净字节,调 `runtime.recovery.recordFile(absPath.toString(), content)`。读盘失败吞掉。调用必须在 `conv.addToolResults(results)` **之前**完成(同 virtual thread 顺序),保证下一次 manageContext 能看到本轮 ReadFile 的记录。
 6. **错误捕获 / 紧急压缩**:在主循环内捕获 `streamOnce` 抛出的 `StreamException`,用 `ex.getCause() instanceof PromptTooLongException` 判断。命中时:
@@ -497,7 +497,7 @@ public final class Agent {
 > - **手动路径**(`/compact` / runForceCompact):不走 Compact 事件路径,由 TUI handleCompact 直接拿到 `(before, after, err)` 三元组通过 `JLine/tui.tea.program.send()` 回投,文案统一格式见后文 TUI 渲染段。
 >
 > ```java
-> // com.mewcode.agent.events
+> // com.cortex.agent.events
 >
 > public enum CompactPhase {
 >     BEFORE_AUTO,
@@ -517,7 +517,7 @@ public final class Agent {
 >         permits TextEvent, ToolEvent, DoneEvent, FailedEvent, CompactEvent {}
 > ```
 
-### Conversation 改造(`com.mewcode.conversation.Conversation`)
+### Conversation 改造(`com.cortex.conversation.Conversation`)
 
 新增一个整体替换方法,并补充内部 lock 保护:
 
@@ -537,16 +537,16 @@ public final class Conversation {
 
 > **性能评估**:每轮 manageContext 都会调 replaceMessages(layer1-only 时也要写回,否则 offloadAndSnip 的字符串替换不会作用于下一轮)。25 轮 × 数十条消息 × 数百 KB 字符串的深拷贝在毫秒级完成,与摘要 LLM 请求几十秒耗时相比可忽略;不做对象池。
 
-### TUI 命令分发(`com.mewcode.tui`)
+### TUI 命令分发(`com.cortex.tui`)
 
-`com.mewcode.tui.MewCodeModel` 现有 `submit()` 内部已经有针对 `/exit` / `/plan` / `/do` 的 switch 分支。本章把这三个命令一并迁移到统一注册表,并新增 `/compact`:
+`com.cortex.tui.CortexModel` 现有 `submit()` 内部已经有针对 `/exit` / `/plan` / `/do` 的 switch 分支。本章把这三个命令一并迁移到统一注册表,并新增 `/compact`:
 
 ```java
-// com.mewcode.tui.Commands(新文件)
+// com.cortex.tui.Commands(新文件)
 
 @FunctionalInterface
 public interface CommandHandler {
-    void handle(MewCodeModel app);
+    void handle(CortexModel app);
 }
 
 public final class Commands {
@@ -566,14 +566,14 @@ public final class Commands {
     // 完成后通过 program.send(new AgentEventMessage(...) 把 (before, after, err) 投回 UI 线程,
     // 由 UI 决定追加系统消息:成功 "已压缩,token 从 X 降至 Y",失败 "压缩失败:<err>"。
     // 命令路径不调 conv.addUser,不写入对话历史。
-    static void handleCompact(MewCodeModel app);
+    static void handleCompact(CortexModel app);
 }
 ```
 
-MewCodeModel 字段调整:
+CortexModel 字段调整:
 
 ```java
-public final class MewCodeModel {
+public final class CortexModel {
     // ... 原有字段
     private final SessionRuntime runtime;  // 新增:跨 run 持有的长生命周期状态
     private final Agent agent;             // 新增:常驻 Agent 实例(在 beginTurn 内复用,不再每轮 build)
@@ -584,7 +584,7 @@ public final class MewCodeModel {
 
 Agent 层新增 `runForceCompact(ctx, conv, defs)` 给 TUI 调用:内部先 `runLock.lock()` 等待主循环空闲,再构造 // (参数直接传入 manage 方法) with `trigger = MANUAL`,调 `ContextCompactor.manageContext`,从 Output 取 beforeTokens / afterTokens 返回。
 
-**TUI 渲染 Compact 事件**(兑现 spec F24a / F24b):`com.mewcode.tui.AgentEvent 队列` 的 `onNext` 在分派 `AgentEvent` 时新增 `event instanceof CompactEvent c` 分支,按 `phase` 渲染系统消息后继续订阅下一帧,**不写入 conversation**:
+**TUI 渲染 Compact 事件**(兑现 spec F24a / F24b):`com.cortex.tui.AgentEvent 队列` 的 `onNext` 在分派 `AgentEvent` 时新增 `event instanceof CompactEvent c` 分支,按 `phase` 渲染系统消息后继续订阅下一帧,**不写入 conversation**:
 
 | Phase | 渲染文案 |
 |-|-|
@@ -595,13 +595,13 @@ Agent 层新增 `runForceCompact(ctx, conv, defs)` 给 TUI 调用:内部先 `run
 
 格式化逻辑抽出一个内部方法 `formatCompactNotice(CompactEvent ev) → String`,让 `handleCompact` 的 program.send() 回投路径(手动 `/compact`)也复用同一个方法渲染完成态文案,确保自动 / 紧急 / 手动三条路径的文案风格一致。
 
-### config 改造(`com.mewcode.config`)
+### config 改造(`com.cortex.config`)
 
 - `ProviderConfig` 增加 `int contextWindow` 字段并支持从 YAML 解码。
 - 新增 `effectiveContextWindow()` 方法:配置 > 0 返回配置值;否则按 protocol 给默认值(anthropic→200000,openai→128000,其他 protocol→200000 作为保守默认)。
-- `com.mewcode.config.ConfigLoaderTest` 增加:未配置 / 配置为 0 / 配置为正数 / 未知 protocol 四种情况的断言。
+- `com.cortex.config.ConfigLoaderTest` 增加:未配置 / 配置为 0 / 配置为正数 / 未知 protocol 四种情况的断言。
 
-### `.mewcode/config.yaml.example` 更新
+### `.cortex/config.yaml.example` 更新
 
 在 providers 数组里给每个 provider 加上 `context_window` 示例值与注释:
 
@@ -738,7 +738,7 @@ groupByUserTurn(msgs) → groups
 ## 文件组织
 
 ```
-src/main/java/com/mewcode/compact/
+src/main/java/com/cortex/compact/
 ├── ContextCompactor.java                  — manageContext 主入口、TriggerKind 枚举、编排两层调用
 ├── // (Layer 1/2 都在 ContextCompactor.java 内)                   — offloadAndSnip / spillSingle / buildPreview
 ├── // (Layer 1/2 都在 ContextCompactor.java 内)                   — autoCompact / forceCompact / runSummary / summarizeOnce / ptlRetry / pickRecentTail / groupByUserTurn
@@ -753,7 +753,7 @@ src/main/java/com/mewcode/compact/
 ├── CompactException.java         — checked exception 基类
 └── PromptTooLongException.java   — PTL 哨兵
 
-src/test/java/dev/mewcode/compact/
+src/test/java/dev/cortex/compact/
 ├── CompactTest.java              — manageContext 集成单测(FakeProvider 驱动)
 ├── Layer1Test.java               — 单条 / 聚合 / 幂等 / 决策冻结 / 落盘失败降级
 ├── Layer2Test.java               — 摘要流程 / PTL 重试 / 熔断计数 / 近期原文边界 / 配对修正
@@ -763,7 +763,7 @@ src/test/java/dev/mewcode/compact/
 └── support/FakeCompactProvider.java
 ```
 
-`com.mewcode.agent.Agent` 改动:
+`com.cortex.agent.Agent` 改动:
 - 新增 `SessionRuntime runtime` 注入字段与 `ReentrantLock runLock`;`Agent.builder()` 增加 `.runtime(SessionRuntime)` 方法以便保留对现有测试的兼容。
 - 把 `streamOnce` 签名改成抛 `StreamException`;错误由内部从 `AgentEvent.ErrorEvent` 捕获。
 - 主循环本轮迭代开头按 mode 选 `defs = registry.getAllSchemas(protocol)` 或 `readOnlyDefinitions()`,同一份列表传给 // (参数直接传入 manage 方法).toolDefs 与 Request.tools。
@@ -773,55 +773,55 @@ src/test/java/dev/mewcode/compact/
 - 捕获 `PromptTooLongException` → `manage(trigger=EMERGENCY)` → 重新估算后同迭代重试一次。
 - 新增 `runForceCompact(ctx, conv, defs) → (before, after, err)` 给 TUI 调;入口先 `runLock.lock()`。
 
-`com.mewcode.agent.SessionRuntime`(新文件):定义 `SessionRuntime` 类与构造函数;Builder 中的 `.runtime(...)` 方法。
+`com.cortex.agent.SessionRuntime`(新文件):定义 `SessionRuntime` 类与构造函数;Builder 中的 `.runtime(...)` 方法。
 
-`com.mewcode.agent.AgentTest` 改动:
+`com.cortex.agent.AgentTest` 改动:
 - 已有 `FakeProvider` 扩展能力:① 在脚本最后一帧之前发送 `StreamEvent.Usage(...)`;② 支持按调用次数序列化错误投递(包括包装好的 `PromptTooLongException`)。
 - 新增"撞墙后紧急压缩成功"与"紧急压缩后再次撞墙上抛"两个用例。
 
-`com.mewcode.conversation.Conversation` 改动:新增 `ReentrantLock lock`;新增 `replaceMessages(List<Message> msgs)`,做深拷贝;已有 `addXxx` / `messages` / `size` / `lastRole` 全部加锁。
+`com.cortex.conversation.Conversation` 改动:新增 `ReentrantLock lock`;新增 `replaceMessages(List<Message> msgs)`,做深拷贝;已有 `addXxx` / `messages` / `size` / `lastRole` 全部加锁。
 
-`com.mewcode.conversation.ConversationTest` 改动:新增 `replaceMessages` 的直接断言用例。
+`com.cortex.conversation.ConversationTest` 改动:新增 `replaceMessages` 的直接断言用例。
 
-`com.mewcode.llm.Provider` 改动:
+`com.cortex.llm.Provider` 改动:
 - 新增 `PromptTooLongException extends LlmException` 哨兵异常。
 - `Map<String, Object>/*tool schema*/` 已是公开 record,无需改动。
 
-`com.mewcode.llm.AnthropicProvider` / `OpenAIProvider` 改动:捕获 provider 返回的"上下文过长"错误码或消息片段,包装成 `new PromptTooLongException(origErr)` 并通过 `publisher.submit(new AgentEvent.ErrorEvent(wrapped))` 投递(接口签名只有 `BlockingQueue` 返回值,错误走 `onError`)。
+`com.cortex.llm.AnthropicProvider` / `OpenAIProvider` 改动:捕获 provider 返回的"上下文过长"错误码或消息片段,包装成 `new PromptTooLongException(origErr)` 并通过 `publisher.submit(new AgentEvent.ErrorEvent(wrapped))` 投递(接口签名只有 `BlockingQueue` 返回值,错误走 `onError`)。
 
-`com.mewcode.llm.AnthropicProviderTest` / `OpenAIProviderTest`:注入构造好的错误返回,断言:① 典型 `prompt_too_long` / `context_length_exceeded` 被 stream 转换成 wrapped error 投递到 `AgentEvent.ErrorEvent`;② `wrapped instanceof PromptTooLongException` 命中;③ 其他 4xx/5xx 错误不被错误地包装为 PTL。
+`com.cortex.llm.AnthropicProviderTest` / `OpenAIProviderTest`:注入构造好的错误返回,断言:① 典型 `prompt_too_long` / `context_length_exceeded` 被 stream 转换成 wrapped error 投递到 `AgentEvent.ErrorEvent`;② `wrapped instanceof PromptTooLongException` 命中;③ 其他 4xx/5xx 错误不被错误地包装为 PTL。
 
-`com.mewcode.tui.Commands`(新文件):`dispatchCommand` + `handleExit` / `handlePlan` / `handleDo` / `handleCompact` + 未知命令兜底。
-`com.mewcode.tui.MewCodeModel`:`submit()` 内原 switch 分支改用 `dispatchCommand` 调用;命令路径不调 `conv.addUser`,不写入对话历史。
-`com.mewcode.tui.MewCodeModel` 字段:新增 `SessionRuntime runtime` 与 `Agent agent`;构造期一次性构造 Agent 并保存。
-`com.mewcode.tui.MewCodeModelTest`:① `/compact` 走命令路径不发 LLM;② `/unknown` 友好提示;③ 迁移后 `/exit` / `/plan` / `/do` 行为不回归三个用例。
+`com.cortex.tui.Commands`(新文件):`dispatchCommand` + `handleExit` / `handlePlan` / `handleDo` / `handleCompact` + 未知命令兜底。
+`com.cortex.tui.CortexModel`:`submit()` 内原 switch 分支改用 `dispatchCommand` 调用;命令路径不调 `conv.addUser`,不写入对话历史。
+`com.cortex.tui.CortexModel` 字段:新增 `SessionRuntime runtime` 与 `Agent agent`;构造期一次性构造 Agent 并保存。
+`com.cortex.tui.CortexModelTest`:① `/compact` 走命令路径不发 LLM;② `/unknown` 友好提示;③ 迁移后 `/exit` / `/plan` / `/do` 行为不回归三个用例。
 
-`com.mewcode.config.ProviderConfig`:追加 `int contextWindow`,加 `effectiveContextWindow()`;现有字段顺序与 yaml 映射不变。
-`com.mewcode.config.ProtocolDefaults`(新文件):`DEFAULT_ANTHROPIC_CONTEXT_WINDOW = 200000`、`DEFAULT_OPENAI_CONTEXT_WINDOW = 128000`。
-`com.mewcode.config.ConfigLoaderTest`:新增四种情况断言。
+`com.cortex.config.ProviderConfig`:追加 `int contextWindow`,加 `effectiveContextWindow()`;现有字段顺序与 yaml 映射不变。
+`com.cortex.config.ProtocolDefaults`(新文件):`DEFAULT_ANTHROPIC_CONTEXT_WINDOW = 200000`、`DEFAULT_OPENAI_CONTEXT_WINDOW = 128000`。
+`com.cortex.config.ConfigLoaderTest`:新增四种情况断言。
 
-`com.mewcode.MewCode`:启动阶段调 `SessionContext.create(workspace)`、`new ContentReplacementState()`、`new RecoveryState()`、`new AutoCompactTrackingState()`,组装为 `SessionRuntime`;待 provider 选定后注入 `effectiveContextWindow()`;把 `SessionRuntime` 交给 MewCodeModel。
+`com.cortex.Cortex`:启动阶段调 `SessionContext.create(workspace)`、`new ContentReplacementState()`、`new RecoveryState()`、`new AutoCompactTrackingState()`,组装为 `SessionRuntime`;待 provider 选定后注入 `effectiveContextWindow()`;把 `SessionRuntime` 交给 CortexModel。
 
-`com.mewcode.smoke.SmokeMain`:同样按新签名构造 Agent;smoke 场景的 contextWindow 可固定 200000。
+`com.cortex.smoke.SmokeMain`:同样按新签名构造 Agent;smoke 场景的 contextWindow 可固定 200000。
 
-`.gitignore`:追加 `.mewcode/sessions/`,避免开发者跑一次 mewcode 后 `git status` 出现一大坨 session 子目录。
+`.gitignore`:追加 `.cortex/sessions/`,避免开发者跑一次 cortex 后 `git status` 出现一大坨 session 子目录。
 
-`.mewcode/config.yaml.example`:新增 `context_window` 字段示例与注释。
+`.cortex/config.yaml.example`:新增 `context_window` 字段示例与注释。
 
 ## 技术决策
 
 | 决策点 | 选择 | 理由 |
 |--------|------|------|
-| 包结构与命名 | `com.mewcode.compact` 单包,子文件按职责拆分(Layer1 / Layer2 / Recovery / Token) | 上下文管理逻辑高度内聚,对外只暴露 `ContextCompactor.manageContext` 等少量静态方法。单包简化导入,多文件保证可读性。子包拆分会引入循环引用风险(Layer2 既要 Token 又要 Recovery)。 |
+| 包结构与命名 | `com.cortex.compact` 单包,子文件按职责拆分(Layer1 / Layer2 / Recovery / Token) | 上下文管理逻辑高度内聚,对外只暴露 `ContextCompactor.manageContext` 等少量静态方法。单包简化导入,多文件保证可读性。子包拆分会引入循环引用风险(Layer2 既要 Token 又要 Recovery)。 |
 | ContentReplacementState 临界区 | offloadAndSnip 持 lock 全程;账本读写不暴露给外部,杜绝 TOCTOU 翻转 | 账本对外只通过 decideOnce 这一个高层方法操作(持锁 + 回调内决策 + 同临界区写入),消除"读账本→落盘→写账本"之间的并发翻转窗口。 |
 | AutoCompactTrackingState 独立于 ContentReplacementState | 拆成两个类 | 熔断只用于自动路径,手动 / 紧急完全绕过;放一起会让"是否应该读熔断字段"在调用点变得模糊。两个类都内嵌 `ReentrantLock` 保证并发安全。 |
 | 9 部分 + 两阶段摘要 prompt 内嵌 | 直接写在 `SummaryPrompt.java` 的 text block(Java 15+ 三引号字符串)常量里 | Prompt 是产品规范的一部分,不需要从外部加载;放代码里方便 review 与版本回滚。也避免在测试里读文件。9 个小节标题用固定字面字符串,便于 extractSummary 与单测匹配。 |
 | 摘要请求不传 tools | Request.tools 留空(`List.of()`) | 摘要本身是"压缩历史"的语义动作,模型不应该在摘要阶段发起新工具调用。保留 tools 会让模型混淆任务,且消耗额外 token。 |
-| ReadFile 后用 Files.readString 重读纯净字节 | 工具 worker virtual thread 内同步重读 | 工具返回字符串带行号前缀(mewcode 现有实现),直接拿来做恢复段会让模型把行号当成代码的一部分。重读一次磁盘成本可忽略;同步顺序保证下一次 manageContext 能观察到本轮记录。 |
+| ReadFile 后用 Files.readString 重读纯净字节 | 工具 worker virtual thread 内同步重读 | 工具返回字符串带行号前缀(cortex 现有实现),直接拿来做恢复段会让模型把行号当成代码的一部分。重读一次磁盘成本可忽略;同步顺序保证下一次 manageContext 能观察到本轮记录。 |
 | 主循环本轮迭代开头算 toolDefs | 局部变量复用,不缓存到 Agent 字段 | F17 要求恢复段声明的工具集合和 Stream 调用的 tools 严格一致。同一轮迭代按 mode 选好后,把同一份列表同时传给 // (参数直接传入 manage 方法).toolDefs 与 Request.tools,引用一致即逐项一致。 |
 | estimateTokens 用 3.5 字符/token | 硬编码 `ESTIMATE_CHARS_PER_TOKEN = 3.5` | 锚定真实 usage 已经是主力,字符比例只用于两次真实请求之间的近似。3.5 是英文+代码混合场景下的常用经验值,过细的差异会被锚点纠正。 |
 | 紧急压缩只重试一次 | 同迭代内 emergencyRetried 锁定一次性重试 | 紧急压缩已经丢掉了一大段历史,如果重试还失败说明问题不是 token 而是其他(如单条 user 消息就超长)。多次重试只会让用户等更久。重试前必须重估 token 低于 `contextWindow - MANUAL_SAFETY_MARGIN`,否则视为不可恢复。 |
-| sessionId 不持久化 | 进程启动生成 `<unix_ts>-<short_random>` | 单进程会话边界等于进程边界,不需要恢复。`.mewcode/sessions/` 留作调试副产物,外部脚本/用户决定清理时机。 |
+| sessionId 不持久化 | 进程启动生成 `<unix_ts>-<short_random>` | 单进程会话边界等于进程边界,不需要恢复。`.cortex/sessions/` 留作调试副产物,外部脚本/用户决定清理时机。 |
 | 阈值硬编码 + 仅 context_window 走 config | 单项 config 暴露 | context_window 由 provider 决定,跨 provider 必须可配。其余阈值若开放为配置会指数级放大测试矩阵,且没有跨用户的差异化需求。本章不开放为配置项;调整属于代码变更。 |
 | Layer 1 落盘失败降级为不替换 | 不进 seenIds,下次重试 | 磁盘问题是瞬时的可恢复故障,不应该让对话因此中断。N6 错误隔离的直接体现。 |
 | Layer 2 PTL 重试中按"用户提交 + 一组往返"分组 | groupByUserTurn 抽成独立方法 | F27 的语义保证最早被丢的是最旧的一整轮交互,不会把同一轮的 user/assistant/tool 拆成半截。独立方法便于单元测试。 |
@@ -832,5 +832,5 @@ src/test/java/dev/mewcode/compact/
 | pickRecentTail 配对修正与 role 衔接 | 截断点前推 + 必要时插入 assistant 占位 | 截断点夹在 tool_use/tool_result 中间时,向前推到 tool_use 之前;若拼接后导致 summary(user) 紧接近期原文首条 user,则在 recovery 段后、近期原文前插入一条 assistant 衔接占位,保证 Anthropic user/assistant 交替约束。 |
 | ProviderConfig 新增方法 effectiveContextWindow | 派生方法而非构造时折算 | 配置加载时不知道 protocol 默认值表,把默认值表收敛到方法里,让 config 加载逻辑保持纯字段映射。也便于后续追加新 protocol 默认值。 |
 | PromptTooLongException 作为 llm 包哨兵异常 | `instanceof` / `getCause()` 判断 | 不同 provider 返回的具体错误结构差异大(HTTP 400 vs structured error),统一成哨兵异常后 agent 主循环只需要一处判断。AnthropicProvider / OpenAIProvider 通过 `publisher.submit(new AgentEvent.ErrorEvent(wrapped))` 把 PTL 错误投递到事件流,主循环从 `AgentEvent.ErrorEvent.error()` 用 `instanceof` 检测。 |
-| context_window 注入时机 | provider 选定后由 Main 注入 SessionRuntime,本会话内不变 | mewcode 启动期 TUI 可能选 provider,等用户选定后才能确定 context_window;本章不支持运行期切 provider;切换 provider 等同于重新启动进程。 |
+| context_window 注入时机 | provider 选定后由 Main 注入 SessionRuntime,本会话内不变 | cortex 启动期 TUI 可能选 provider,等用户选定后才能确定 context_window;本章不支持运行期切 provider;切换 provider 等同于重新启动进程。 |
 | context_window 下界检查 | 必须 > `SUMMARY_RESERVE + AUTO_SAFETY_MARGIN`(即 > 33000) | 低于此值时 `contextWindow - 33000` 为非正数,自动阈值判断永远成立,每轮都会触发摘要导致死循环;manageContext 在入口对 contextWindow 做 sanity check,过小时跳过自动 layer2 并写一条警告日志。 |

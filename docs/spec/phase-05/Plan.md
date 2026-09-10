@@ -10,8 +10,8 @@ ch06 新增一个 **permission 包**承载前四层防御与配置加载，并�
 
 - **permission 包（新增）**：定义 `Mode`（四档枚举）、`Decision`（Allow/Deny/Ask）、`Category`（READ/WRITE/EXEC）；实现前四层判定 `PermissionEngine.check`；持有黑名单正则集、沙箱（项目根 + 符号链接解析）、三级规则集（user/project/local 三个配置文件）、模式兜底矩阵、友好名映射与路径提取。对外暴露 `check`、本地规则持久化、配置加载。仅依赖 `llm`（取 `ToolCall`）与 JDK 标准库 + SnakeYAML Engine + Jackson（解析 ToolCall.input 的 JSON）。
 - **agent 包（改造）**：原 `agent.Mode` 枚举迁移到 permission 包（`NORMAL`→`DEFAULT`，新增 `ACCEPT_EDITS`/`BYPASS`）；`Agent` 持有 `PermissionEngine`；`executeBatched` 在执行每个工具前调用 `PermissionEngine.check`——Allow 执行、Deny 直接产被拒结果、Ask 通过 `BlockingQueue<AgentEvent>` 发出 `ApprovalRequest` 事件并**阻塞**等 TUI 回传决策（通过 `BlockingQueue<Outcome>` 单元素回传）；新增 `ApprovalRequest` 事件类型与决策回传通道。plan 档的只读工具集与提醒沿用 ch04（键 `mode == permission.Mode.PLAN`）。
-- **tui 包（改造）**：`MewCodeModel.mode` 改为 `permission.Mode`，持有 `PermissionEngine`；新增 `APPROVING` 态与待批准请求渲染/按键处理；**全局 Ctrl+C/Esc 分派从仅 `STREAMING` 扩展到 `STREAMING || APPROVING`**（见下，否则 approving 态 Ctrl+C 会退出整个程序）；**新增全局 `Shift+Tab` 按键循环切换权限模式**（仅 IDLE 态生效）；状态栏左侧改为**常驻显示当前权限模式（取代 provider 名）**；把会话/永久放行的规则写入交给引擎（经 agent 在 Loop 内应用，TUI 只回传用户选择）。
-- **Main（改造）**：用项目根（`Path.of("").toAbsolutePath().toRealPath()`）构造 `PermissionEngine.create`、注入 `MewCodeModel`。
+- **tui 包（改造）**：`CortexModel.mode` 改为 `permission.Mode`，持有 `PermissionEngine`；新增 `APPROVING` 态与待批准请求渲染/按键处理；**全局 Ctrl+C/Esc 分派从仅 `STREAMING` 扩展到 `STREAMING || APPROVING`**（见下，否则 approving 态 Ctrl+C 会退出整个程序）；**新增全局 `Shift+Tab` 按键循环切换权限模式**（仅 IDLE 态生效）；状态栏左侧改为**常驻显示当前权限模式（取代 provider 名）**；把会话/永久放行的规则写入交给引擎（经 agent 在 Loop 内应用，TUI 只回传用户选择）。
+- **Main（改造）**：用项目根（`Path.of("").toAbsolutePath().toRealPath()`）构造 `PermissionEngine.create`、注入 `CortexModel`。
 - **smoke（改造）**：非交互，以 `Mode.BYPASS` 运行（无法人在回路、避免阻塞在 Ask），构造一个根于 cwd 的引擎。
 
 数据流（单个工具调用）：
@@ -35,7 +35,7 @@ agent.executeBatched(calls, mode)
 
 ### permission.Mode（迁移自 agent + 扩展）
 ```java
-package com.mewcode.permission;
+package com.cortex.permission;
 
 public enum Mode {
     DEFAULT,        // 只读 Allow / 文件写 Ask / 命令执行 Ask
@@ -206,8 +206,8 @@ public BlockingQueue<AgentEvent> run(ConversationManager conv, Mode mode) { ... 
 
 ### tui 包
 ```java
-// 现有签名扩展：末尾增 engine 形参（保持 (MewCodeModel, throws IOException) 风格）：
-public MewCodeModel(List<ProviderConfig> providers, String version, ToolToolRegistry registry, PermissionEngine engine) { ... }
+// 现有签名扩展：末尾增 engine 形参（保持 (CortexModel, throws IOException) 风格）：
+public CortexModel(List<ProviderConfig> providers, String version, ToolToolRegistry registry, PermissionEngine engine) { ... }
 ```
 
 ## 模块设计
@@ -251,11 +251,11 @@ public MewCodeModel(List<ProviderConfig> providers, String version, ToolToolRegi
   }
   ```
 
-### tui 包（MewCodeModel.java / AgentEvent 队列.java / Styles.java + MarkdownRenderer.java；（provider 选择逻辑集成在 MewCodeModel 内） 不动）
+### tui 包（CortexModel.java / AgentEvent 队列.java / Styles.java + MarkdownRenderer.java；（provider 选择逻辑集成在 CortexModel 内） 不动）
 **职责：** 新增待批准交互态；模式切换命令；状态栏模式徽标；全局取消覆盖 approving 态。
 **关键点：**
-- `MewCodeModel`：`Mode mode`→`permission.Mode mode`（初值 `engine.startMode()`）；加 `PermissionEngine engine`、`ApprovalRequest pending`、`int approveCursor`。
-- 构造 `MewCodeModel(providers, version, registry, engine)`（保持现有抛 `IOException` 风格）：存引擎、置初始模式。
+- `CortexModel`：`Mode mode`→`permission.Mode mode`（初值 `engine.startMode()`）；加 `PermissionEngine engine`、`ApprovalRequest pending`、`int approveCursor`。
+- 构造 `CortexModel(providers, version, registry, engine)`（保持现有抛 `IOException` 风格）：存引擎、置初始模式。
 - **全局按键分派（blocker 修复）**：在 JLine/tui.tea 的全局 `KeyStroke` 拦截器（顶层 `WindowListener.onUnhandledInput` 或 `BasicWindow` keyboard handler）里，`Ctrl+C`/`Esc` 的 `state == STREAMING` 条件改为 `state == STREAMING || state == APPROVING`；在 approving 态触发取消时，先向 `pending.respond()` `offer(Outcome.DENY_ONCE)`（容量=1 不阻塞，兜底解 agent 阻塞），再调 `cancelTurn()`。
 - `handleEvent` 处理 `AgentEvent.Approval`：保存 `pending`、`approveCursor = 0`、切 `APPROVING` 状态，**不再立即请求下一个事件**（agent 正阻塞等回传，订阅仍持有，下次 `onNext` 在用户选完后自然到达）。
 - `updateApproving(KeyStroke key)`：维护 `approveCursor`（0/1/2）；`ArrowUp`/`k`、`ArrowDown`/`j` 循环移动光标；`Enter` 提交当前光标项；数字键 `'1'`/`'2'`/`'3'` 直选并提交；另 `y`=允许本次、`n`/`d`=拒绝本次 便捷键。索引→`Outcome` 由 `outcomeForIndex` 显式映射（0=ALLOW_ONCE、1=ALLOW_FOREVER、2=DENY_ONCE）。选定后回 `STREAMING`、清 `pending`，`pending.respond().offer(outcome)`（agent `take()` 即解阻塞）。
@@ -265,13 +265,13 @@ public MewCodeModel(List<ProviderConfig> providers, String version, ToolToolRegi
 - `statusBar`：左侧改为**常驻显示当前权限模式**（取代 provider 名）：`Mode.DEFAULT`→`DEFAULT`（灰/绿）、`Mode.ACCEPT_EDITS`→`ACCEPT EDITS`、`Mode.PLAN`→`PLAN`（黄）、`Mode.BYPASS`→`BYPASS`（红）；右侧保留模型名 + token 用量不变。可在启动提示行（`Prompt` 的 ready hint）补「Shift+Tab 切换权限模式」。
 
 ### Main / smoke
-- `MewCode.java`：`Path root = Path.of("").toAbsolutePath();`，能 `toRealPath()` 就用，失败保留 `root`；`PermissionEngine engine = PermissionEngine.create(root);`（create 内部已把 IO 失败降级为空规则引擎，只在 stderr 打 `权限引擎降级:...`）；`new MewCodeModel(cfg.providers(), version, registry, engine).run()`。
-- `smoke/MewCode.java`：新增 `Path cwd = Path.of("").toAbsolutePath();`；`PermissionEngine engine = PermissionEngine.create(cwd);`；`new Agent(provider, DefaultToolRegistry.create(), "dev", engine)`；`agent.run(conv, Mode.BYPASS)`。确认 smoke 现有用例文件操作目标均在 cwd 子树内（否则会被沙箱拦）。
+- `Cortex.java`：`Path root = Path.of("").toAbsolutePath();`，能 `toRealPath()` 就用，失败保留 `root`；`PermissionEngine engine = PermissionEngine.create(root);`（create 内部已把 IO 失败降级为空规则引擎，只在 stderr 打 `权限引擎降级:...`）；`new CortexModel(cfg.providers(), version, registry, engine).run()`。
+- `smoke/Cortex.java`：新增 `Path cwd = Path.of("").toAbsolutePath();`；`PermissionEngine engine = PermissionEngine.create(cwd);`；`new Agent(provider, DefaultToolRegistry.create(), "dev", engine)`；`agent.run(conv, Mode.BYPASS)`。确认 smoke 现有用例文件操作目标均在 cwd 子树内（否则会被沙箱拦）。
 
 ## 模块交互
 
 ```
-Main → PermissionEngine.create(root) → new MewCodeModel(..., engine)
+Main → PermissionEngine.create(root) → new CortexModel(..., engine)
 TUI ─按 Shift+Tab→ mode 循环切换 DEFAULT→ACCEPT_EDITS→PLAN→BYPASS→DEFAULT（跨轮保持）
 TUI ─beginTurn→ new Agent(provider, registry, version, engine).run(conv, mode)
   agent.executeBatched(calls, mode):
@@ -289,8 +289,8 @@ TUI ─beginTurn→ new Agent(provider, registry, version, engine).run(conv, mod
 ## 文件组织
 
 ```
-mewcode/
-├── src/main/java/com/mewcode/permission/
+cortex/
+├── src/main/java/com/cortex/permission/
 │   ├── Mode.java               — 新：Mode 四档 + displayName/parse；Decision/Category/Outcome 同包定义或拆分文件
 │   ├── Decision.java           — 新：enum Decision { ALLOW, DENY, ASK }
 │   ├── Category.java           — 新：enum Category { READ, WRITE, EXEC }
@@ -302,26 +302,26 @@ mewcode/
 │   ├── RuleSet.java            — 新：RuleSet 持有 allow/deny + match()
 │   ├── Settings.java           — 新：record Settings、loadSettings(SnakeYAML)、toRuleSet、FriendlyNames、Categorizer、TargetExtractor
 │   └── Persister.java          — 新：persistLocalAllow、ruleFor（写本地层文件）
-├── src/test/java/dev/mewcode/permission/
+├── src/test/java/dev/cortex/permission/
 │   └── *Test.java              — 新：黑名单/沙箱(含祖先回退)/规则/优先级/矩阵/加载降级/解析失败 单测（JUnit 5）
-├── src/main/java/com/mewcode/agent/
+├── src/main/java/com/cortex/agent/
 │   ├── Agent.java              — 改：删 Mode（迁 permission）；Agent 加 engine；executeBatched(+mode) 接入 check；requestApproval；ApprovalRequest record；AgentEvent.Approval；Deny 用 ToolResult 构造
 │   ├── ApprovalRequest.java    — 新：record（也可作 Agent 内部 record）
 │   └── ...（原文件保持）
-├── src/test/java/dev/mewcode/agent/
+├── src/test/java/dev/cortex/agent/
 │   └── AgentTest.java          — 改/新：权限集成(Allow/Deny/Ask/会话/永久)、保序、只读并发不退化、取消、模式迁移
-├── src/main/java/com/mewcode/tui/
-│   ├── MewCodeModel.java             — 改：mode→permission.Mode、加 engine/pending/approveCursor；构造增参；APPROVING 分派；全局 Ctrl+C/Esc 覆盖 approving；Shift+Tab (ReverseTab) 循环模式(nextMode)
+├── src/main/java/com/cortex/tui/
+│   ├── CortexModel.java             — 改：mode→permission.Mode、加 engine/pending/approveCursor；构造增参；APPROVING 分派；全局 Ctrl+C/Esc 覆盖 approving；Shift+Tab (ReverseTab) 循环模式(nextMode)
 │   ├── AgentEvent 队列.java         — 改：handleEvent 处理 Approval；updateApproving；sendOutcome；submit 保留 /plan·/do（去掉 /mode）；beginTurn 传 engine
 │   └── Styles.java + MarkdownRenderer.java               — 改：statusBar 左侧常驻模式(取代 provider 名)；待批准块渲染
-├── src/test/java/dev/mewcode/tui/
-│   └── MewCodeModelTest.java         — 改：Shift+Tab 循环切换、approval 态按键回传、Esc 取消兜底、状态栏常驻模式、模式跨轮保持
-├── src/main/java/com/mewcode/config/  — 不改（provider 配置与 permission settings 分离）
-├── src/main/java/com/mewcode/MewCode.java                — 改：构造 PermissionEngine 注入 MewCodeModel
-├── src/main/java/com/mewcode/smoke/MewCode.java          — 改：cwd + 构造引擎、Mode.BYPASS 运行
+├── src/test/java/dev/cortex/tui/
+│   └── CortexModelTest.java         — 改：Shift+Tab 循环切换、approval 态按键回传、Esc 取消兜底、状态栏常驻模式、模式跨轮保持
+├── src/main/java/com/cortex/config/  — 不改（provider 配置与 permission settings 分离）
+├── src/main/java/com/cortex/Cortex.java                — 改：构造 PermissionEngine 注入 CortexModel
+├── src/main/java/com/cortex/smoke/Cortex.java          — 改：cwd + 构造引擎、Mode.BYPASS 运行
 ├── build.gradle.kts                                            — 改：加 jackson-databind 依赖（解析 ToolCall.input JSON）
-├── .gitignore                                         — 改：加 .mewcode/settings.local.yaml
-└── .mewcode/settings.yaml.example                     — 新：权限配置示例（defaultMode + allow/deny）
+├── .gitignore                                         — 改：加 .cortex/settings.local.yaml
+└── .cortex/settings.yaml.example                     — 新：权限配置示例（defaultMode + allow/deny）
 ```
 
 ## 技术决策
@@ -341,7 +341,7 @@ mewcode/
 | plan 语义 | 沿用 ch04 硬限制（只读工具集+提醒）+ /do | 用户拍板；矩阵 plan 行仅防御性兜底；/plan 与 defaultMode=plan 都按 Mode.PLAN 应用 |
 | 模式兜底值域 | 只产 Allow/Ask（无 Deny 档） | 用户拍板矩阵；Deny 仅来自黑名单/沙箱/deny 规则/人在回路 |
 | 规则优先级 | 会话>本地>项目>用户；同层 deny 优先 allow | 用户拍板「越靠近会话越优先」；deny 优先更安全 |
-| 永久放行落点 | 写本地层 `.mewcode/settings.local.yaml`（gitignore） | 用户拍板；不进 git、不影响队友（对齐 Claude Code don't-ask-again） |
+| 永久放行落点 | 写本地层 `.cortex/settings.local.yaml`（gitignore） | 用户拍板；不进 git、不影响队友（对齐 Claude Code don't-ask-again） |
 | 自动规则泛化 | 不泛化，只生成精确规则 | 自动猜泛化模式有误放行风险；泛化交用户手写 |
 | 规则名 | 友好名 Bash/Read/Write/Edit/Glob/Grep ↔ 内部名映射 | 用户示例即友好名；对齐 Claude Code 习惯，规则更可读 |
 | 参数解析失败归属 | 文件类不可解析→Deny；bash 缺 command→落 Ask；未知工具→EXEC/Ask | N7/AC15 安全默认，绝不静默 Allow |
