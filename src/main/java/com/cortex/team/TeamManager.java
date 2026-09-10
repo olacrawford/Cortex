@@ -31,7 +31,7 @@ import java.util.concurrent.locks.ReentrantLock;
 /**
  * Team 管理器（F3-F7/G1）：单进程内管理多个 Team；队员 spawn（实现 agent.TeamHook）；
  * 队员空闲通知（T30）与 Lead 邮箱轮询（F41a）。Pane 后端的队员子进程自治模式
- * （--team-member）本期未实现，spawn 时 pane 后端报错（检测与命令构造已完成并单测）。
+ * （--team-member）已落地：spawn 时预写邮箱、split pane 并记录 paneId，空闲经 wake 唤醒。
  */
 public final class TeamManager implements TeamHook, com.cortex.task.TeamCollaboration {
 
